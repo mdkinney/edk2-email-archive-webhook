@@ -21,7 +21,7 @@ class Progress(git.remote.RemoteProgress):
     def update(self, op_code, cur_count, max_count=None, message=''):
         Line = '\r' + self._cur_line
         if len(self.PreviousLine) > len(Line):
-            Line = Line + '%*s' % (len(self.PreviousLine) - len(Line), ' ')
+            Line = Line + ' ' * (len(self.PreviousLine) - len(Line))
         sys.stdout.write(Line)
         self.PreviousLine = Line
 
@@ -30,30 +30,32 @@ def FetchPullRequest (HubPullRequest):
     # Fetch the base.ref branch and current PR branch from the base repository
     # of the pull request
     #
-    if os.path.exists (HubPullRequest.base.repo.name):
-        print ('mount', HubPullRequest.base.repo.full_name)
+    RepositoryPath = os.path.normpath (os.path.join ('Repository', HubPullRequest.base.repo.full_name))
+    if os.path.exists (RepositoryPath):
+        print ('mount', RepositoryPath)
         try:
-            GitRepo = git.Repo(HubPullRequest.base.repo.name)
+            GitRepo = git.Repo(RepositoryPath)
             Origin = GitRepo.remotes['origin']
         except:
-            print ('init', HubPullRequest.base.repo.full_name)
-            GitRepo = git.Repo.init (HubPullRequest.base.repo.name, bare=True)
+            print ('init', RepositoryPath)
+            GitRepo = git.Repo.init (RepositoryPath, bare=True)
             Origin = GitRepo.create_remote ('origin', HubPullRequest.base.repo.html_url)
     else:
-        print ('init', HubPullRequest.base.repo.full_name)
-        os.mkdir (HubPullRequest.base.repo.name)
-        GitRepo = git.Repo.init (HubPullRequest.base.repo.name, bare=True)
+        print ('init', RepositoryPath)
+        os.makedirs (RepositoryPath)
+        GitRepo = git.Repo.init (RepositoryPath, bare=True)
         Origin = GitRepo.create_remote ('origin', HubPullRequest.base.repo.html_url)
-    print ('fetch', HubPullRequest.base.repo.full_name)
+    print ('fetch', RepositoryPath)
     #
     # Shallow fetch base.ref branch from origin
     #
     Origin.fetch(HubPullRequest.base.ref, progress=Progress(), depth = 1)
+    print ('')
     #
     # Fetch the current pull request branch from origin
     #
     Origin.fetch('+refs/pull/%d/merge:refs/remotes/origin/pr/%d' % (HubPullRequest.number, HubPullRequest.number), progress=Progress())
-    print ('fetch', HubPullRequest.base.repo.full_name, 'done')
+    print ('\nfetch', RepositoryPath, 'done')
 
     #
     # Retrieve the latest version of Maintainers.txt from origin/base.ref
