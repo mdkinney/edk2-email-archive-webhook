@@ -11,6 +11,7 @@ SendMails
 from __future__ import print_function
 
 import os
+import email
 import smtplib
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import (
@@ -33,7 +34,7 @@ SMTP_PASSWORD          = os.environ['SMTP_PASSWORD']
 GROUPS_IO_ADDRESS      = os.environ['GROUPS_IO_ADDRESS']
 SENDGRID_API_KEY       = os.environ['SENDGRID_API_KEY']
 
-def SendEmails (EmailContents, SendMethod):
+def SendEmails (HubPullRequest, EmailContents, SendMethod):
     if SendMethod == 'SMTP':
         #
         # Send emails to SMTP Server
@@ -49,23 +50,21 @@ def SendEmails (EmailContents, SendMethod):
             SmtpServer.quit()
         except:
             print ('SendEmails: error: can not connect or login or send messages.')
-    if SendMethod == 'SendGrid':
+    elif SendMethod == 'SendGrid':
         #
         # Send emails to SendGrid
         #
         for Email in EmailContents:
-            Email = Email.splitlines (keepends=True)
-            for LineNumber in range (0, len(Email)):
-                Line = Email[LineNumber]
-                if Line.startswith('Subject: '):
-                    EmailSubject = Line.split('Subject: ', 1)[1].strip()
-                    EmailContents = ''.join(Email[LineNumber + 1:])
-                    break
+            Email = email.message_from_string(Email)
             message = Mail()
             message.from_email = From('webhook@tianocore.org', 'TianoCore')
             message.to = To(GROUPS_IO_ADDRESS, 'edk2codereview')
-            message.subject = Subject(EmailSubject)
-            message.content = Content(MimeType.text, EmailContents)
+            message.subject = Subject(Email['Subject'])
+            for Field in ['Message-Id', 'In-Reply-To']:
+                if Field in Email:
+                    message.header = Header(Field, Email[Field])
+            message.content = Content(MimeType.text, Email.get_payload())
+            print (message)
             try:
                 sendgrid_client = SendGridAPIClient(SENDGRID_API_KEY)
                 response = sendgrid_client.send(message)
@@ -74,3 +73,10 @@ def SendEmails (EmailContents, SendMethod):
                 print(response.headers)
             except Exception as e:
                 print(e.body)
+    else:
+        Index = 0
+        for Email in EmailContents:
+            Index = Index + 1
+            print ('pr[%d] email[%d]' % (HubPullRequest.number, Index), '----> Draft Email Start <----')
+            print (Email)
+            print ('pr[%d] email[%d]' % (HubPullRequest.number, Index), '----> Draft Email End   <----')

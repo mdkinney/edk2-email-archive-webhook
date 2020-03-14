@@ -148,3 +148,37 @@ def GetMaintainers (Maintainers, Files):
         if addresslist:
             Addresses += addresslist
     return Addresses
+
+def ParseMaintainerAddresses (Addresses):
+    EmailList = []
+    GitHubIdList = []
+    AddressList = []
+    for Line in Addresses:
+        Line = Line.strip()
+        AddressType = Line.split(':')[0].strip()
+        if AddressType == 'R':
+            AddressList.append('Reviewer  : ' + Line.split(':')[1].strip())
+        elif AddressType == 'M':
+            AddressList.append('Maintainer: ' + Line.split(':')[1].strip())
+        else:
+            continue
+        if '[' not in Line or ']' not in Line:
+            print ('ERROR: Missing GitHub ID: ' + Line)
+            continue
+        GitHubId = Line.split('[')[1].split(']')[0].strip()
+        if GitHubId == '':
+            print ('ERROR: Missing GitHub ID: ' + Line)
+            continue
+        GitHubIdList.append(GitHubId)
+        if '<' not in Line or '>' not in Line:
+            print ('ERROR: Missing email address: ' + Line)
+            continue
+        Email = Line.split('<')[1].split('>')[0].strip()
+        if '@' not in Email:
+            print ('ERROR: Invalid email address: ' + Line)
+            continue
+        EmailList.append(Email)
+    EmailList    = list(set(EmailList))
+    GitHubIdList = list(set(GitHubIdList))
+    AddressList  = list(set(AddressList))
+    return AddressList, GitHubIdList, EmailList

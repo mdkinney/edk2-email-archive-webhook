@@ -20,8 +20,11 @@ from json import dumps
 from flask import Flask, request, abort
 from github import Github
 from GetMaintainers import GetMaintainers
+from GetMaintainers import ParseMaintainerAddresses
 from SendEmails import SendEmails
 from FetchPullRequest import FetchPullRequest
+from FetchPullRequest import FormatPatch
+from FetchPullRequest import FormatPatchSummary
 
 #
 # Globals for help information
@@ -36,6 +39,84 @@ GITHUB_WEBHOOK_ROUTE       = os.environ['GITHUB_WEBHOOK_ROUTE']
 GITHUB_WEBHOOK_PORT_NUMBER = int(os.environ['GITHUB_WEBHOOK_PORT_NUMBER'])
 GITHUB_REPO_WHITE_LIST     = os.environ['GITHUB_REPO_WHITE_LIST']
 
+REVIEW_REQUEST     = '[CodeReview] Review-request @'
+REVIEWED_BY        = '[CodeReview] Reviewed-by'
+SERIES_REVIEWED_BY = '[CodeReview] Series-reviewed-by'
+ACKED_BY           = '[CodeReview] Acked-by'
+TESTED_BY          = '[CodeReview] Acked-by'
+
+def UpdatePullRequestCommitReviewers (Commit, GitHubIdList):
+    #
+    # Retrieve all review comments for this commit
+    #
+    Body = []
+    for Comment in Commit.get_comments():
+        Body = Body + [Line.strip() for Line in Comment.body.splitlines()]
+
+    #
+    # Determine if any reviewers need to be added to this commit
+    #
+    AddReviewers = []
+    for Reviewer in GitHubIdList:
+        if REVIEW_REQUEST + Reviewer not in Body:
+            AddReviewers.append(REVIEW_REQUEST + Reviewer + '\n')
+    if AddReviewers != []:
+        for Reviewer in AddReviewers:
+            print ('  ' + '  '.join(AddReviewers))
+        #
+        # NOTE: This triggers a recursion into this webhook that needs to be
+        # ignored
+        #
+        Commit.create_comment (''.join(AddReviewers))
+
+    #
+    # Return True if reviewers were added to this commit
+    #
+    return AddReviewers != []
+
+def UpdatePullRequestReviewers (Hub, HubPullRequest, PullRequestGitHubIdList):
+    #
+    # Get list of reviewers already requested for the pull request
+    #
+    RequestedReviewers = HubPullRequest.get_review_requests()[0]
+
+    #
+    # Determine if any reviewers need to be removed
+    #
+    RemoveReviewerList = []
+    for Reviewer in RequestedReviewers:
+        if Reviewer.login not in PullRequestGitHubIdList:
+            print ('pr[%d]' % (HubPullRequest.number), 'Remove Reviewer    : @' + Reviewer.login)
+            RemoveReviewerList.append(Reviewer.login)
+
+    #
+    # Determine if any reviewers need to be added
+    #
+    AddReviewerList = []
+    for Login in PullRequestGitHubIdList:
+        Reviewer = Hub.get_user(Login)
+        if Reviewer == HubPullRequest.user:
+            print ('pr[%d]' % (HubPullRequest.number), 'Reviewer is Author : @' + Reviewer.login)
+        elif Reviewer not in RequestedReviewers:
+            print ('pr[%d]' % (HubPullRequest.number), 'Add Reviewer       : @' + Reviewer.login)
+            AddReviewerList.append (Reviewer.login)
+        else:
+            print ('pr[%d]' % (HubPullRequest.number), 'Already Assigned   : @' + Reviewer.login)
+
+    #
+    # Update review requests
+    #
+    if RemoveReviewerList != []:
+        #
+        # NOTE: This may trigger recursion into this webhook
+        #
+        HubPullRequest.delete_review_request (RemoveReviewerList)
+    if AddReviewerList != []:
+        #
+        # NOTE: This may trigger recursion into this webhook
+        #
+        HubPullRequest.create_review_request (AddReviewerList)
+
 application = Flask(__name__)
 
 @application.route(GITHUB_WEBHOOK_ROUTE, methods=['GET', 'POST'])
@@ -43,8 +124,9 @@ def index():
     """
     Main WSGI application entry.
     """
-    print (request.headers)
-    
+    if args.Verbose:
+        print (request.headers)
+
     # Only POST is implemented
     if request.method != 'POST':
         print (501, "only POST is supported")
@@ -151,363 +233,364 @@ def index():
         print ('skip event for different repo')
         return dumps({'status': 'skipped'})
 
-    #
+
+    print ('----> Process Event <----', event, payload['action'])
+
+    ############################################################################
     # Process issue comment events
     # These are comments against the entire pull request
     # Quote Patch #0 Body and add comment below below with commenters GitHubID
-    #
+    ############################################################################
     if event == 'issue_comment':
-      action = payload['action']
-      if action not in ['created', 'edited']:
-          print ('skip issue_comment event with action other than created or edited')
-          return dumps({'status': 'skipped'})
-      if 'pull_request' not in payload['issue']:
-          print ('skip issue_comment event without an associated pull request')
-          return dumps({'status': 'skipped'})
+        action = payload['action']
+        if action not in ['created', 'edited']:
+            print ('skip issue_comment event with action other than created or edited')
+            return dumps({'status': 'skipped'})
+        if 'pull_request' not in payload['issue']:
+            print ('skip issue_comment event without an associated pull request')
+            return dumps({'status': 'skipped'})
 
-      # 
-      # Use GitHub API to get Pull Request
-      #
-      try:
-          HubRepo = Hub.get_repo (payload['repository']['full_name'])
-          HubPullRequest = HubRepo.get_pull(payload['issue']['number'])
-      except:
-          #
-          # Skip requests if the PyGitHub objects can not be retrieved
-          #
-          print ('skip issue_comment event for which the PyGitHub objects can not be retrieved')
-          return dumps({'status': 'skipped'})
-
-      #
-      # Skip pull request with a base repo that is different than the expected repo
-      #
-      if HubPullRequest.base.repo.full_name != HubRepo.full_name:
-          print ('Skip PR event against a different repo', HubPullRequest.base.repo.full_name)
-          return dumps({'status': 'skipped'})
-      
-      #
-      # Skip pull requests with a base branch that is not the default branch
-      #
-      if HubPullRequest.base.ref != HubRepo.default_branch:
-          print ('Skip PR event against non-default base branch', HubPullRequest.base.ref)
-          return dumps({'status': 'skipped'})
-
-      #
-      # Count head_ref_force_pushed events to determine the version of 
-      # the patch series.
-      #
-      PatchSeriesVersion = 1;
-      Events = HubPullRequest.get_issue_events()
-      for Event in Events:
-          if Event.event == 'head_ref_force_pushed':
-              PatchSeriesVersion = PatchSeriesVersion + 1;
-
-
-      print ('From: TianoCore <webhook@tianocore.org>')
-      print ('Subject: Re [edk2codereview][%s][PATCH v%d %*d/%d] %s' % (HubRepo.name, PatchSeriesVersion, len(str(HubPullRequest.commits)), 0, HubPullRequest.commits, HubPullRequest.title))
-      print ('In-Reply-To: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0))
-      print ('Message-ID: <webhook-%s-pull%d-v%d-p%d-c%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0, payload['comment']['id']))
-      
-      print ('')
-      print ('> ' + '> '.join(HubPullRequest.body.splitlines(keepends=True)))
-      print ('')
-      print ('@' + payload['comment']['user']['login'] + ' commented:')
-      print (payload['comment']['body'])
-
-      #
-      # Send any generated emails
-      #
-#      SendEmails (EmailContents, args.EmailServer)
-
-      print ('issue_comment created or edited done')
-      return dumps({'msg': 'issue_comment created or edited'})
-
-    #
-    # Process pull request events
-    #
-    if event == 'pull_request':
-      action = payload['action']
-      if action not in ['opened', 'synchronize']:
-          print ('skip pull_request event with action other than opened or synchronized')
-          return dumps({'status': 'skipped'})
-
-      # 
-      # Use GitHub API to get Pull Request
-      #
-      try:
-          HubRepo = Hub.get_repo (payload['repository']['full_name'])
-          HubPullRequest = HubRepo.get_pull(payload['pull_request']['number'])
-      except:
-          #
-          # Skip requests if the PyGitHub objects can not be retrieved
-          #
-          print ('skip pull_request event for which the PyGitHub objects can not be retrieved')
-          return dumps({'status': 'skipped'})
-
-      #
-      # Skip pull request with a base repo that is different than the expected repo
-      #
-      if HubPullRequest.base.repo.full_name != HubRepo.full_name:
-          print ('Skip PR event against a different repo', HubPullRequest.base.repo.full_name)
-          return dumps({'status': 'skipped'})
-      
-      #
-      # Skip pull requests with a base branch that is not the default branch
-      #
-      if HubPullRequest.base.ref != HubRepo.default_branch:
-          print ('Skip PR event against non-default base branch', HubPullRequest.base.ref)
-          return dumps({'status': 'skipped'})
-
-      #
-      # Fetch the git commits for the pull request and return a git repo 
-      # object and the contents of Maintainers.txt
-      #
-      GitRepo, Maintainers = FetchPullRequest (HubPullRequest)
-
-      NewPatchSeries = False
-      PatchSeriesVersion = 1;
-      if action == 'opened':
-          #
-          # New pull request was created
-          #
-          NewPatchSeries = True
-      if action == 'synchronize':
-          #
-          # Existing pull request was updated.
-          # Commits were added to an existing pull request or an existing pull
-          # request was forced push.  Get events to determine what happened
-          #
-          Events = HubPullRequest.get_issue_events()
-          for Event in Events:
-              #
-              # Count head_ref_force_pushed events to determine the version of 
-              # the patch series.
-              #
-              if Event.event == 'head_ref_force_pushed':
-                  PatchSeriesVersion = PatchSeriesVersion + 1;
-                  #
-                  # If the head_ref_force_pushed event occurred at the exact
-                  # same date/time (or within 2 seconds) that the pull request
-                  # was updated, then this was a forced push and the entire
-                  # patch series should be emailed again.
-                  #
-                  if abs(Event.created_at - HubPullRequest.updated_at).seconds <= 2:
-                      NewPatchSeries = True
-
-      GitHubIdList = []
-      EmailList = []
-      PullRequestEmailAddressList = []
-      EmailContents = []
-      PatchNumber = 0
-      for Commit in HubPullRequest.get_commits():
-        PatchNumber = PatchNumber + 1
+        # 
+        # Use GitHub API to get Pull Request
         #
-        # Get commit from GIT repository
-        #
-        CommitFiles = GitRepo.commit(Commit.sha).stats.files
+        try:
+            HubRepo = Hub.get_repo (payload['repository']['full_name'])
+            HubPullRequest = HubRepo.get_pull(payload['issue']['number'])
+        except:
+            #
+            # Skip requests if the PyGitHub objects can not be retrieved
+            #
+            print ('skip issue_comment event for which the PyGitHub objects can not be retrieved')
+            return dumps({'status': 'skipped'})
 
         #
-        # Get maintainers and reviewers for all files in this commit
+        # Skip pull request with a base repo that is different than the expected repo
         #
-        Addresses = GetMaintainers (Maintainers, CommitFiles)
-
-        #
-        # Determine GitHub IDs of required reviewers
-        #
-        SingleCommitGitHubIdList = []
-        SingleCommitEmailAddressList = []
-        for Line in Addresses:
-            Line = Line.strip()
-            if Line.split(':')[0] not in ['R', 'M']:
-                continue
-            if Line.split(':')[0] == 'R':
-                SingleCommitEmailAddressList.append('Reviewer  : ' + Line.split(':')[1].strip())
-                PullRequestEmailAddressList.append('Reviewer  : ' + Line.split(':')[1].strip())
-            if Line.split(':')[0] == 'M':
-                SingleCommitEmailAddressList.append('Maintainer: ' + Line.split(':')[1].strip())
-                PullRequestEmailAddressList.append('Maintainer: ' + Line.split(':')[1].strip())
-            if '[' in Line and ']' in Line:
-                print (__prog__ + ': Parse GitHub ID from: ', Line)
-                GitHubId = Line.split('[')[1].split(']')[0].strip()
-                if GitHubId:
-                    SingleCommitGitHubIdList.append(GitHubId)
-                    GitHubIdList.append(GitHubId)
-                else:
-                    print (__prog__ + ': error: Missing GitHub ID: ' + Line)
-                    continue
-            else:
-                print (__prog__ + ': error: Missing GitHub ID: ' + Line)
-                continue
-            if '<' in Line and '>' in Line:
-                print (__prog__ + ': Parse email from: ', Line)
-                Email = Line.split('<')[1].split('>')[0].strip()
-                if '@' in Email:
-                    EmailList.append(Email)
-                else:
-                    print (__prog__ + ': error: Invalid email address: ' + Line)
-                    continue
-            else:
-                print (__prog__ + ': error: Missing email address: ' + Line)
-                continue
-        SingleCommitGitHubIdList = list(set(SingleCommitGitHubIdList))
-
-        #
-        # Retrieve all review comments for this commit
-        #
-        Body = ''
-        Comments = Commit.get_comments()
-        for Comment in Comments:
-            Body = Body + Comment.body
-        Body = Body.splitlines()
-        print (Body)
+        if HubPullRequest.base.repo.full_name != HubRepo.full_name:
+            print ('Skip PR event against a different repo', HubPullRequest.base.repo.full_name)
+            return dumps({'status': 'skipped'})
         
-        AddReviewers = []
-        for Reviewer in SingleCommitGitHubIdList:
-            if 'Review Request: @' + Reviewer not in Body:
-                AddReviewers.append(Reviewer)
-        if AddReviewers != []:
-            print ('Assign Reviewers to commit', Commit.sha, AddReviewers)
-            Commit.create_comment ('Review Request: @' + '\nReview Request: @'.join(AddReviewers))
+        #
+        # Skip pull requests with a base branch that is not the default branch
+        #
+        if HubPullRequest.base.ref != HubRepo.default_branch:
+            print ('Skip PR event against non-default base branch', HubPullRequest.base.ref)
+            return dumps({'status': 'skipped'})
 
         #
-        # Generate email contents for all commits in a pull request if this is
-        # a new pull request or a forced push was done to an existing pull request.
-        # Generate email contents for patches that add new reviewers.  This 
-        # occurs when when new commits are added to an existing pull request.
+        # Fetch the git commits for the pull request and return a git repo 
+        # object and the contents of Maintainers.txt
         #
-        if NewPatchSeries or AddReviewers != []:
+        GitRepo, Maintainers = FetchPullRequest (HubPullRequest)
+
+        #
+        # Count head_ref_force_pushed events to determine the version of 
+        # the patch series.
+        #
+        PatchSeriesVersion = 1;
+        Events = HubPullRequest.get_issue_events()
+        for Event in Events:
+            if Event.event == 'head_ref_force_pushed':
+                PatchSeriesVersion = PatchSeriesVersion + 1;
+
+
+        PullRequestAddressList = []
+        for Commit in HubPullRequest.get_commits():
             #
-            # Format the Subject:
-            #   [<repo name>][PATCH v<patch series version> <patch number>/<number of patches>]
-            # Format the Messsage-ID:
-            #   <webhook-<repo name>-pr<pull>-v<patch series version>-p<patch number>@tianocore.org>
+            # Get list of files modifies by commit from GIT repository
             #
-            Email = GitRepo.git.format_patch (
-                      '--stdout',
-                      '--from=TianoCore <webhook@tianocore.org>',
-                      '--subject-prefix=%s][PATCH v%d %*d/%d' % (HubRepo.name, PatchSeriesVersion, len(str(HubPullRequest.commits)), PatchNumber, HubPullRequest.commits),
-                      '--add-header=Message-ID: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, PatchNumber),
-                      Commit.sha + '~1..' + Commit.sha
-                      )
-            Email = Email.splitlines (keepends=True)
-            EmailLineEnding = '\n'
-            if Email[0].endswith('\r\n'):
-                EmailLineEnding = '\r\n'
-            elif Email[0].endswith('\r'):
-                EmailLineEnding = '\r'
+            CommitFiles = GitRepo.commit(Commit.sha).stats.files
 
-            ModifiedEmail = []
-            Found = False
-            for Line in Email:
-                ModifiedEmail.append(Line)
-                if Found or Line.rstrip() != '---':
-                    continue
-                Found = True
-                ModifiedEmail.append('#' * 4 + EmailLineEnding)
-                #
-                # Add link to pull request
-                #
-                ModifiedEmail.append('# PR: ' + HubPullRequest.html_url + EmailLineEnding)
-                #
-                # Add link to commit
-                #
-                ModifiedEmail.append('# Commit: ' + Commit.html_url + EmailLineEnding)
-                #
-                # Add list of assigned reviewers
-                #
-                for Address in SingleCommitEmailAddressList:
-                    ModifiedEmail.append('# ' + Address + EmailLineEnding)
-                ModifiedEmail.append('#' * 4 + EmailLineEnding)
-            EmailContents.append (''.join(ModifiedEmail))
+            #
+            # Get maintainers and reviewers for all files in this commit
+            #
+            Addresses = GetMaintainers (Maintainers, CommitFiles)
+            AddressList, GitHubIdList, EmailList = ParseMaintainerAddresses(Addresses)
+            PullRequestAddressList  = list(set(PullRequestAddressList  + AddressList))
 
-      GitHubIdList = list(set(GitHubIdList))
-      EmailList    = list(set(EmailList))
-      PullRequestEmailAddressList = list(set(PullRequestEmailAddressList))
-
-      #
-      # Determine list of reviewers to add and remove to the entire pull request
-      #
-      RequestedReviewers = HubPullRequest.get_review_requests()[0]
-
-      RemoveReviewerList = []
-      for Reviewer in RequestedReviewers:
-          if Reviewer.login not in GitHubIdList:
-              print ('Remove Reviewer  :', Reviewer.login)
-              RemoveReviewerList.append(Reviewer.login)
-
-      AddReviewerList = []
-      for Login in GitHubIdList:
-          Reviewer = Hub.get_user(Login)
-          if Reviewer == HubPullRequest.user:
-              print ('Reviewer is Author :', Reviewer.login)
-          elif Reviewer not in RequestedReviewers:
-              print ('Add Reviewer     :', Reviewer.login)
-              AddReviewerList.append (Reviewer.login)
-          else:
-              print ('Already Assigned :', Reviewer.login)
-
-      #
-      # Update review requests
-      #
-      if RemoveReviewerList != []:
-          HubPullRequest.delete_review_request (RemoveReviewerList)
-      if AddReviewerList != []:
-          HubPullRequest.create_review_request (AddReviewerList)
-
-      if NewPatchSeries:
-          #
-          # Format the Subject:
-          #   [<repo name>][PATCH v<patch series version> <patch number>/<number of patches>]
-          # Format the Messsage-ID:
-          #   <webhook-<repo name>-pr<pull>-v<patch series version>-p<patch number>@tianocore.org>
-          #
-          Patches = GitRepo.git.format_patch (
-                    '--stdout',
-                    '--from=TianoCore <webhook@tianocore.org>',
-                    '--cover-letter', 
-                    '--subject-prefix=%s][PATCH v%d' % (HubRepo.name, PatchSeriesVersion),
-                    '--add-header=Message-ID: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0),
-                    HubPullRequest.base.sha + '..' + HubPullRequest.head.sha
+        #
+        # Generate the summary email patch #0 with body of email prefixed with >.
+        #
+        Summary = FormatPatchSummary (
+                    GitRepo, 
+                    HubRepo, 
+                    HubPullRequest, 
+                    PullRequestAddressList, 
+                    PatchSeriesVersion, 
+                    CommentId = payload['comment']['id'], 
+                    Prefix = '> '
                     )
-          Summary = Patches.split ('\n-- \n', 1)[0] + '\n-- \n'
-          Summary = Summary.replace ('*** SUBJECT HERE ***', HubPullRequest.title, 1)
 
-          Email = Summary.splitlines (keepends=True)[1:]
-          EmailLineEnding = '\n'
-          if Email[0].endswith('\r\n'):
-              EmailLineEnding = '\r\n'
-          elif Email[0].endswith('\r'):
-              EmailLineEnding = '\r'
+        #
+        # Send any generated emails
+        #
+        SendEmails (HubPullRequest, [Summary], args.EmailServer)
 
-          for LineNumber in range(0, len(Email)):
-              if Email[LineNumber].startswith('From: '):
-                  Email[LineNumber] = 'From: TianoCore <webhook@tianocore.org>' + EmailLineEnding
-                  break
-          Summary = ''.join(Email)
+        print ('----> Process Event Done <----', event, payload['action'])
+        return dumps({'msg': 'issue_comment created or edited'})
 
-          Blurb = []
-          Blurb.append('#' * 4 + EmailLineEnding)
-          #
-          # Add link to pull request
-          #
-          Blurb.append('# PR: ' + HubPullRequest.html_url + EmailLineEnding)
-          #
-          # Add list of assigned reviewers
-          #
-          for Address in PullRequestEmailAddressList:
-              Blurb.append('# ' + Address + EmailLineEnding)
-          Blurb.append('#' * 4 + EmailLineEnding)
-          Blurb.append(EmailLineEnding)
-          Summary = Summary.replace ('*** BLURB HERE ***', ''.join(Blurb) + HubPullRequest.body, 1)
-          EmailContents = [Summary] + EmailContents
+    ############################################################################
+    # Process commit comment events
+    # These are comments against a specific commit
+    # Quote Patch #n commit message and add comment below below with commenters GitHubID
+    ############################################################################
+    if event == 'commit_comment':
+        action = payload['action']
+        if action not in ['created', 'edited']:
+            print ('skip commit_comment event with action other than created or edited')
+            return dumps({'status': 'skipped'})
 
-      #
-      # Send any generated emails
-      #
-      SendEmails (EmailContents, args.EmailServer)
+        #
+        # Skip REVIEW_REQUEST comments made by the webhook itself.  This same
+        # information is always present in the patch emails, so filtering these
+        # comments prevent double emails when a pull request is opened or
+        # synchronized.
+        #
+        Body = payload['comment']['body'].splitlines()
+        for Line in payload['comment']['body'].splitlines():
+            if Line.startswith (REVIEW_REQUEST):
+                print ('skip commit_comment event with review request body from this webhook')
+                return dumps({'status': 'skipped'})
 
-      print ('pull_request opened or synchronize done')
-      return dumps({'msg': 'pull_request opened or synchronize'})
+        #
+        # Search for issues/pull requests that contain the comment's commit_id
+        #
+        CommitId        = payload['comment']['commit_id']
+        CommentId       = payload['comment']['id']
+        CommentPosition = payload['comment']['position']
+        CommentLine     = payload['comment']['line']
+        CommentPath     = payload['comment']['path']
+        EmailContents   = []
+        for Issue in Hub.search_issues('SHA:' + CommitId):
+            #
+            # Skip Issue for a different repository
+            #
+            if Issue.repository.full_name != payload['repository']['full_name']:
+                print ('Skip commit_comment event against a different repo', HubPullRequest.base.repo.full_name)
+                continue
+
+            # 
+            # Use GitHub API to get Pull Request
+            #
+            try:
+                HubRepo = Issue.repository
+                HubPullRequest = Issue.as_pull_request()
+            except:
+                print ('skip commit_comment event for which the PyGitHub objects can not be retrieved')
+                continue
+
+            #
+            # Skip commit_comment with a base repo that is different than the expected repo
+            #
+            if HubPullRequest.base.repo.full_name != HubRepo.full_name:
+                print ('Skip commit_comment event against a different repo', HubPullRequest.base.repo.full_name)
+                continue
+            
+            #
+            # Skip commit_comment with a base branch that is not the default branch
+            #
+            if HubPullRequest.base.ref != HubRepo.default_branch:
+                print ('Skip commit_comment event against non-default base branch', HubPullRequest.base.ref)
+                continue
+
+            #
+            # Fetch the git commits for the pull request and return a git repo 
+            # object and the contents of Maintainers.txt
+            #
+            GitRepo, Maintainers = FetchPullRequest (HubPullRequest)
+
+            #
+            # Count head_ref_force_pushed events to determine the version of 
+            # the patch series.
+            #
+            PatchSeriesVersion = 1;
+            Events = HubPullRequest.get_issue_events()
+            for Event in Events:
+                if Event.event == 'head_ref_force_pushed':
+                    PatchSeriesVersion = PatchSeriesVersion + 1;
+
+            #
+            # Determine the patch number of the commit with the comment
+            #
+            PatchNumber = 0
+            for Commit in HubPullRequest.get_commits():
+                PatchNumber = PatchNumber + 1
+                if Commit.sha == CommitId:
+                    break
+
+            #
+            # Get commit from GIT repository
+            #
+            CommitFiles = GitRepo.commit(Commit.sha).stats.files
+
+            #
+            # Get maintainers and reviewers for all files in this commit
+            #
+            Addresses = GetMaintainers (Maintainers, CommitFiles)
+            AddressList, GitHubIdList, EmailList = ParseMaintainerAddresses(Addresses)
+
+            Email = FormatPatch (
+                        GitRepo, 
+                        HubRepo, 
+                        HubPullRequest, 
+                        Commit, 
+                        AddressList, 
+                        PatchSeriesVersion, 
+                        PatchNumber, 
+                        CommentId = CommentId,
+                        CommentPosition = CommentPosition,
+                        CommentLine = CommentLine,
+                        CommentPath = CommentPath,
+                        Prefix = '> '
+                        )
+
+            EmailContents.append (Email)
+
+        if EmailContents == []:
+            print ('skip commit_comment that is not for any supported repo')
+            return dumps({'status': 'skipped'})
+
+        #
+        # Send any generated emails
+        #
+        SendEmails (HubPullRequest, EmailContents, args.EmailServer)
+
+        print ('----> Process Event Done <----', event, payload['action'])
+        return dumps({'msg': 'commit_comment created or edited'})
+
+    ############################################################################
+    # Process pull request events
+    ############################################################################
+    if event == 'pull_request':
+        action = payload['action']
+        if action not in ['opened', 'synchronize']:
+            print ('skip pull_request event with action other than opened or synchronized')
+            return dumps({'status': 'skipped'})
+
+        # 
+        # Use GitHub API to get Pull Request
+        #
+        try:
+            HubRepo = Hub.get_repo (payload['repository']['full_name'])
+            HubPullRequest = HubRepo.get_pull(payload['pull_request']['number'])
+        except:
+            #
+            # Skip requests if the PyGitHub objects can not be retrieved
+            #
+            print ('skip pull_request event for which the PyGitHub objects can not be retrieved')
+            return dumps({'status': 'skipped'})
+
+        #
+        # Skip pull request with a base repo that is different than the expected repo
+        #
+        if HubPullRequest.base.repo.full_name != HubRepo.full_name:
+            print ('Skip PR event against a different repo', HubPullRequest.base.repo.full_name)
+            return dumps({'status': 'skipped'})
+
+        #
+        # Skip pull requests with a base branch that is not the default branch
+        #
+        if HubPullRequest.base.ref != HubRepo.default_branch:
+            print ('Skip PR event against non-default base branch', HubPullRequest.base.ref)
+            return dumps({'status': 'skipped'})
+
+        #
+        # Fetch the git commits for the pull request and return a git repo 
+        # object and the contents of Maintainers.txt
+        #
+        GitRepo, Maintainers = FetchPullRequest (HubPullRequest)
+
+        NewPatchSeries = False
+        PatchSeriesVersion = 1;
+        if action == 'opened':
+            #
+            # New pull request was created
+            #
+            NewPatchSeries = True
+        if action == 'synchronize':
+            #
+            # Existing pull request was updated.
+            # Commits were added to an existing pull request or an existing pull
+            # request was forced push.  Get events to determine what happened
+            #
+            Events = HubPullRequest.get_issue_events()
+            for Event in Events:
+                #
+                # Count head_ref_force_pushed events to determine the version of 
+                # the patch series.
+                #
+                if Event.event == 'head_ref_force_pushed':
+                    PatchSeriesVersion = PatchSeriesVersion + 1;
+                    #
+                    # If the head_ref_force_pushed event occurred at the exact
+                    # same date/time (or within 2 seconds) that the pull request
+                    # was updated, then this was a forced push and the entire
+                    # patch series should be emailed again.
+                    #
+                    if abs(Event.created_at - HubPullRequest.updated_at).seconds <= 2:
+                        NewPatchSeries = True
+
+        PullRequestAddressList = []
+        PullRequestGitHubIdList = []
+        PullRequestEmailList = []
+        EmailContents = []
+        PatchNumber = 0
+        for Commit in HubPullRequest.get_commits():
+
+            PatchNumber = PatchNumber + 1
+
+            #
+            # Get list of files modifies by commit from GIT repository
+            #
+            CommitFiles = GitRepo.commit(Commit.sha).stats.files
+
+            #
+            # Get maintainers and reviewers for all files in this commit
+            #
+            Addresses = GetMaintainers (Maintainers, CommitFiles)
+            AddressList, GitHubIdList, EmailList = ParseMaintainerAddresses(Addresses)
+            PullRequestAddressList  = list(set(PullRequestAddressList  + AddressList))
+            PullRequestGitHubIdList = list(set(PullRequestGitHubIdList + GitHubIdList))
+            PullRequestEmailList    = list(set(PullRequestEmailList    + EmailList))
+
+            print ('pr[%d]' % (HubPullRequest.number), Commit.sha, ' @' + ' @'.join(PullRequestGitHubIdList))
+
+            #
+            # Update the list of required reviewers for this commit
+            #
+            ReviewersUpdated = UpdatePullRequestCommitReviewers (Commit, GitHubIdList)
+
+            #
+            # Generate email contents for all commits in a pull request if this is
+            # a new pull request or a forced push was done to an existing pull request.
+            # Generate email contents for patches that add new reviewers.  This 
+            # occurs when when new commits are added to an existing pull request.
+            #
+            if NewPatchSeries or ReviewersUpdated:
+                Email = FormatPatch (GitRepo, HubRepo, HubPullRequest, Commit, AddressList, PatchSeriesVersion, PatchNumber)
+                EmailContents.append (Email)
+
+        #
+        # Update the list of required reviewers for the pull request
+        #
+        UpdatePullRequestReviewers (Hub, HubPullRequest, PullRequestGitHubIdList)
+
+        #
+        # If this is a new pull request or a forced push on a pull request, then
+        # generate the summary email patch #0 and add to be beginning of the
+        # list of emails to send.
+        #
+        if NewPatchSeries:
+            Summary = FormatPatchSummary (GitRepo, HubRepo, HubPullRequest, PullRequestAddressList, PatchSeriesVersion)
+            EmailContents.insert (0, Summary)
+
+        #
+        # Send any generated emails
+        #
+        SendEmails (HubPullRequest, EmailContents, args.EmailServer)
+
+        print ('----> Process Event Done <----', event, payload['action'])
+        return dumps({'msg': 'pull_request opened or synchronize'})
 
     print ('skip unsupported event')
     return dumps({'status': 'skipped'})
@@ -519,7 +602,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser (prog = __prog__,
                                       description = __description__ + __copyright__,
                                       conflict_handler = 'resolve')
-    parser.add_argument ("-e", "--email-server", dest = 'EmailServer', choices = ['SMTP', 'SendGrid'], required = True,
+    parser.add_argument ("-e", "--email-server", dest = 'EmailServer', choices = ['Off', 'SMTP', 'SendGrid'], default = 'Off', 
                          help = "Email server type used to send emails.")
     parser.add_argument ("-v", "--verbose", dest = 'Verbose', action = "store_true",
                          help = "Increase output messages")
@@ -543,7 +626,7 @@ if __name__ == '__main__':
         sys.exit(1)
 
     try:
-        application.run(debug=False, host='localhost', port=GITHUB_WEBHOOK_PORT_NUMBER)
+        application.run(debug=False, host='localhost', port=GITHUB_WEBHOOK_PORT_NUMBER, threaded=False)
     except:
         print ('can not create listener for GitHub HTTP requests')
         sys.exit(1)
