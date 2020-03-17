@@ -14,6 +14,7 @@ import os
 import sys
 import git
 import email
+import textwrap
 
 class Progress(git.remote.RemoteProgress):
     def __init__(self):
@@ -128,7 +129,86 @@ def GetLineEnding (Line):
     else:
         return '\n'
 
-def FormatPatch (GitRepo, HubRepo, HubPullRequest, Commit, AddressList, PatchSeriesVersion, PatchNumber, CommentId = None, CommentPosition = None, CommentLine = None, CommentPath = None, Prefix = ''):
+def MetaDataBlockText(HubPullRequest, Commit, AddressList, LineEnding):
+    Text = ''
+    #
+    # Add link to pull request
+    #
+    Text = Text + '#' * 4 + LineEnding
+    Text = Text + '# PR: ' + HubPullRequest.html_url + LineEnding
+
+    #
+    # Add link to commit
+    #
+    if Commit is not None:
+        Text = Text + '# Commit: ' + Commit.html_url + LineEnding
+
+    #
+    # Add list of assigned reviewers
+    #
+    for Address in AddressList:
+        Text = Text + '# ' + Address + LineEnding
+    Text = Text + '#' * 4 + LineEnding
+    Text = Text + LineEnding
+
+    return Text
+
+def QuoteText (Text, Prefix, Depth):
+    Text = Text.splitlines(keepends=True)
+    return (Prefix * Depth) + (Prefix * Depth).join(Text)
+
+def CommentAsEmailText(Comment, LineEnding, Prefix, Depth):
+    #
+    # Wrap long lines in comment body, but never split HTML links that may
+    # contain hyphens.
+    #
+    WrappedBody = []
+    for Paragraph in Comment.body.splitlines(keepends=True):
+        WrappedParagraph = textwrap.wrap(
+                               Paragraph,
+                               replace_whitespace=False,
+                               drop_whitespace=False,
+                               break_long_words=False,
+                               break_on_hyphens=False
+                               )
+        WrappedBody.append (LineEnding.join(WrappedParagraph))
+
+    String = 'On %s @%s wrote:%s%s' % (
+               str(Comment.created_at),
+               Comment.user.login,
+               LineEnding,
+               ''.join(WrappedBody)
+               )
+    if String[-1] not in ['\n','\r']:
+        String = String + LineEnding
+    return QuoteText (String, Prefix, Depth)
+
+def QuoteCommentList (Comments, Before = '', After = '', LineEnding = '\n', Prefix = '> '):
+    #
+    # Sort comments from oldest comment to newest comment
+    #
+    Comments = sorted (Comments, key=lambda Comment: Comment.created_at)
+    Body = ''
+    if Before:
+        if Before[-1] not in ['\n','\r']:
+            Before = Before + LineEnding
+        Body = Body + QuoteText (Before, Prefix, len(Comments))
+    Depth = len(Comments)
+    for Comment in Comments:
+        Depth = Depth - 1
+        Body = Body + CommentAsEmailText(Comment, LineEnding, Prefix, Depth)
+    if After:
+        if After[-1] not in ['\n','\r']:
+            After = After + LineEnding
+        Body = Body + QuoteText (After, Prefix, len(Comments))
+    return Body
+
+def FormatPatch (event, GitRepo, HubRepo, HubPullRequest, Commit, AddressList, PatchSeriesVersion, PatchNumber, CommentType = None, CommentId = None, CommentPosition = None, CommentPath = None, Prefix = '', CommentInReplyToId = None):
+    #
+    # Default range is a single commit
+    #
+    CommitRange = Commit.sha + '~1..' + Commit.sha
+
     #
     # Format the Subject:
     #   [<repo name>][PATCH v<patch series version> <patch number>/<number of patches>]
@@ -136,14 +216,24 @@ def FormatPatch (GitRepo, HubRepo, HubPullRequest, Commit, AddressList, PatchSer
     #   <webhook-<repo name>-pr<pull>-v<patch series version>-p<patch number>@tianocore.org>
     #
     if CommentId:
-        Email = GitRepo.git.format_patch (
-                  '--stdout',
-                  '--from=TianoCore <webhook@tianocore.org>',
-                  '--add-header=In-Reply-To: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, PatchNumber),
-                  '--add-header=Message-ID: <webhook-%s-pull%d-v%d-p%d-c%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, PatchNumber, CommentId),
-                  '--subject-prefix=%s][PATCH v%d %*d/%d' % (HubRepo.name, PatchSeriesVersion, len(str(HubPullRequest.commits)), PatchNumber, HubPullRequest.commits),
-                  Commit.sha + '~1..' + Commit.sha
-                  )
+        if CommentInReplyToId:
+            Email = GitRepo.git.format_patch (
+                      '--stdout',
+                      '--from=TianoCore <webhook@tianocore.org>',
+                      '--add-header=In-Reply-To: <webhook-%s-pull%d-v%d-p%d-c%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, PatchNumber, CommentInReplyToId),
+                      '--add-header=Message-ID: <webhook-%s-pull%d-v%d-p%d-c%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, PatchNumber, CommentId),
+                      '--subject-prefix=%s][PATCH v%d %*d/%d' % (HubRepo.name, PatchSeriesVersion, len(str(HubPullRequest.commits)), PatchNumber, HubPullRequest.commits),
+                      CommitRange
+                      )
+        else:
+            Email = GitRepo.git.format_patch (
+                      '--stdout',
+                      '--from=TianoCore <webhook@tianocore.org>',
+                      '--add-header=In-Reply-To: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, PatchNumber),
+                      '--add-header=Message-ID: <webhook-%s-pull%d-v%d-p%d-c%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, PatchNumber, CommentId),
+                      '--subject-prefix=%s][PATCH v%d %*d/%d' % (HubRepo.name, PatchSeriesVersion, len(str(HubPullRequest.commits)), PatchNumber, HubPullRequest.commits),
+                      CommitRange
+                      )
     else:
         Email = GitRepo.git.format_patch (
                   '--stdout',
@@ -151,100 +241,115 @@ def FormatPatch (GitRepo, HubRepo, HubPullRequest, Commit, AddressList, PatchSer
                   '--add-header=In-Reply-To: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0),
                   '--add-header=Message-ID: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, PatchNumber),
                   '--subject-prefix=%s][PATCH v%d %*d/%d' % (HubRepo.name, PatchSeriesVersion, len(str(HubPullRequest.commits)), PatchNumber, HubPullRequest.commits),
-                  Commit.sha + '~1..' + Commit.sha
+                  CommitRange
                   )
     #
-    # Remove first line from format-patch that is not part of email
+    # Remove first line from format-patch that is not part of email and parse
+    # the line ending style used by git format-patch
     #
-    Email = Email.splitlines(keepends=True)[1:]
-
+    Email = Email.splitlines(keepends=True)
     LineEnding = GetLineEnding (Email[0])
-
-    ModifiedEmail = []
-    Found = False
-    for Line in Email:
-        ModifiedEmail.append(Line)
-        if Found or Line.rstrip() != '---':
-            continue
-        Found = True
-        ModifiedEmail.append('#' * 4 + LineEnding)
-        #
-        # Add link to pull request
-        #
-        ModifiedEmail.append('# PR: ' + HubPullRequest.html_url + LineEnding)
-        #
-        # Add link to commit
-        #
-        ModifiedEmail.append('# Commit: ' + Commit.html_url + LineEnding)
-        #
-        # Add list of assigned reviewers
-        #
-        for Address in AddressList:
-            ModifiedEmail.append('# ' + Address + LineEnding)
-        ModifiedEmail.append('#' * 4 + LineEnding)
-        if CommentId:
-            break
-    ModifiedEmail = ''.join(ModifiedEmail)
+    Email = ''.join(Email[1:])
 
     #
-    # If Prefix is provided, then add to beginning of each line
+    # Parse the email message and parse the message body.  Split the message
+    # body at the '\n---\n' marker which seperates the commit message from the
+    # patch diffs.
     #
-    if Prefix:
-        BodyFound = False
-        ModifiedEmail = ModifiedEmail.splitlines(keepends=True)
-        for LineNumber in range(0, len(ModifiedEmail)):
-            if BodyFound:
-                ModifiedEmail[LineNumber] = Prefix + ModifiedEmail[LineNumber]
-            if ModifiedEmail[LineNumber].strip() == '':
-                BodyFound = True
-        ModifiedEmail = ''.join(ModifiedEmail)
+    Message = email.message_from_string(Email)
+    Pattern = '\n---\n'
+    Body = Message.get_payload().split (Pattern, 1)
+    Body[0] = Body[0] + Pattern
+
+    #
+    # Add text with links to pull request and the commit along with the list
+    # of maintainers/reviewers for this specific commit after the '\n---\n'
+    # marker so this meta data is not part of the commit message or the patch
+    # diffs.
+    #
+    Body[0] = Body[0] + MetaDataBlockText(
+                            HubPullRequest,
+                            Commit,
+                            AddressList,
+                            LineEnding
+                            )
 
     if CommentId:
-        CommentText = ''
-        for Comment in Commit.get_comments():
-            AddComment = False
-            if None in [CommentPosition, CommentLine, CommentPath]:
-                if None in [Comment.position, Comment.line, Comment.path]:
-                    AddComment = True
-            if None not in [CommentPosition, CommentLine, CommentPath]:
-                if None not in [Comment.position, Comment.line, Comment.path]:
-                    AddComment = True
-            if not AddComment:
-                continue
-            Text = 'On ' + str(Comment.created_at) + ' @' + Comment.user.login + ' wrote:' + LineEnding + Comment.body  + LineEnding
-            if Comment.id != CommentId:
-                Text = Prefix + Prefix.join(Text.splitlines(keepends=True))
-            CommentText = CommentText + Text
-        if None in [CommentPosition, CommentLine, CommentPath]:
+        #
+        # Get the comments that apply based on the event type
+        #
+        AllComments = []
+        if event == 'commit_comment':
+            AllComments = Commit.get_comments()
+        if event == 'pull_request_review_comment':
+            AllComments = HubPullRequest.get_review_comments()
+        #
+        # Only keep the comments that match the CommentPath and CommentPosition
+        # from this event
+        #
+        Comments = []
+        for Comment in AllComments:
+            if Comment.path == CommentPath and Comment.position == CommentPosition:
+                Comments.append(Comment)
+
+        if CommentPath == None:
             #
-            # Append comments after commit message
+            # This is a comment against the description of the commit.  Discard
+            # the patch diffs and append the review comments quoting the commit
+            # message and all previous comments.
             #
-            ModifiedEmail = ModifiedEmail + CommentText
+            Body = QuoteCommentList (
+                       Comments,
+                       Before     = Body[0],
+                       LineEnding = LineEnding,
+                       Prefix     = Prefix
+                       )
         else:
             #
-            # Insert comments into patch
+            # Find the portion of the patch diffs that contain changes to the
+            # file specified by CommentPath
             #
-            Email = ''.join(Email)
-            Pattern = '\ndiff --git a/' + CommentPath + ' b/' + CommentPath + '\n'
-            Email = Email.split (Pattern, 1)[1]
-            Email = Pattern + Email.split ('\ndiff --git a/')[0]
-            Email = Email.splitlines (keepends=True)
-            QuotedEmail = []
-            for Index in range(0, len(Email)):
-                if Email[Index].startswith('@@ '):
-                    ModifiedEmail = ModifiedEmail + Prefix + Prefix.join(Email[:Index+CommentLine+1]) + CommentText + Prefix + Prefix.join(Email[Index+CommentLine+1:])
+            Start   = '\ndiff --git a/' + CommentPath + ' b/' + CommentPath + '\n'
+            End     = '\ndiff --git a/'
+            try:
+                Body[1] = Start + Body[1].split(Start,1)[1].split(End,1)[0]
+                Body[1] = Body[1].lstrip()
+            except:
+                Body[1] = Body[1] + 'ERROR: %s Comment to file %s position %d not found.\n' % (Commit.sha, CommentPath, CommentPosition)
+
+            #
+            # Find the first line of the patch diff for file CommentPath that
+            # starts with '@@ '.
+            #
+            Body[1] = Body[1].splitlines(keepends=True)
+            for LineNumber in range(0, len(Body[1])):
+                if Body[1][LineNumber].startswith('@@ '):
                     break
 
-    #
-    # Add Re: to Subject if a comment is being processed
-    #
-    Message = email.message_from_string(ModifiedEmail)
-#    if CommentId:
-#        Message.replace_header('Subject', 'Re: [edk2codereview] ' + Message['Subject'])
+            #
+            # Insert comments into patch at CommentPosition + 1 lines after '@@ '
+            #
+            LineNumber = LineNumber + CommentPosition + 1
+            Body = QuoteCommentList (
+                       Comments,
+                       Before     = ''.join(Body[1][:LineNumber]),
+                       After      = ''.join(Body[1][LineNumber:]),
+                       LineEnding = LineEnding,
+                       Prefix     = Prefix
+                       )
+    else:
+        Body = Body[0] + Body[1]
 
+    Message.set_payload(Body)
     return Message.as_string()
 
-def FormatPatchSummary (GitRepo, HubRepo, HubPullRequest, AddressList, PatchSeriesVersion, CommentId = None, Prefix = ''):
+def FormatPatchSummary (event, GitRepo, HubRepo, HubPullRequest, AddressList, PatchSeriesVersion, CommitRange = None, CommentId = None, CommentPosition = None, CommentPath = None, Prefix = '', CommentInReplyToId = None):
+    #
+    # Default range is the entire pull request
+    #
+    if CommitRange is None:
+        CommitRange = HubPullRequest.base.sha + '..' + HubPullRequest.head.sha
+
     #
     # Format the Subject:
     #   [<repo name>][PATCH v<patch series version> <patch number>/<number of patches>]
@@ -252,94 +357,156 @@ def FormatPatchSummary (GitRepo, HubRepo, HubPullRequest, AddressList, PatchSeri
     #   <webhook-<repo name>-pr<pull>-v<patch series version>-p<patch number>@tianocore.org>
     #
     if CommentId:
-        Summary = GitRepo.git.format_patch (
-                    '--stdout',
-                    '--cover-letter', 
-                    '--from=TianoCore <webhook@tianocore.org>',
-                    '--add-header=In-Reply-To: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0),
-                    '--add-header=Message-ID: <webhook-%s-pull%d-v%d-p%d-c%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0, CommentId),
-                    '--subject-prefix=%s][PATCH v%d' % (HubRepo.name, PatchSeriesVersion),
-                    HubPullRequest.base.sha + '..' + HubPullRequest.head.sha
-                    )
+        if CommentInReplyToId:
+            Email = GitRepo.git.format_patch (
+                      '--stdout',
+                      '--cover-letter',
+                      '--from=TianoCore <webhook@tianocore.org>',
+                      '--add-header=In-Reply-To: <webhook-%s-pull%d-v%d-p%d-c%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0, CommentInReplyToId),
+                      '--add-header=Message-ID: <webhook-%s-pull%d-v%d-p%d-c%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0, CommentId),
+                      '--subject-prefix=%s][PATCH v%d' % (HubRepo.name, PatchSeriesVersion),
+                      CommitRange
+                      )
+        else:
+            Email = GitRepo.git.format_patch (
+                      '--stdout',
+                      '--cover-letter',
+                      '--from=TianoCore <webhook@tianocore.org>',
+                      '--add-header=In-Reply-To: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0),
+                      '--add-header=Message-ID: <webhook-%s-pull%d-v%d-p%d-c%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0, CommentId),
+                      '--subject-prefix=%s][PATCH v%d' % (HubRepo.name, PatchSeriesVersion),
+                      CommitRange
+                      )
     else:
-        Summary = GitRepo.git.format_patch (
-                    '--stdout',
-                    '--cover-letter', 
-                    '--from=TianoCore <webhook@tianocore.org>',
-                    '--add-header=Message-ID: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0),
-                    '--subject-prefix=%s][PATCH v%d' % (HubRepo.name, PatchSeriesVersion),
-                    HubPullRequest.base.sha + '..' + HubPullRequest.head.sha
-                    )
+        Email = GitRepo.git.format_patch (
+                  '--stdout',
+                  '--cover-letter',
+                  '--from=TianoCore <webhook@tianocore.org>',
+                  '--add-header=Message-ID: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0),
+                  '--subject-prefix=%s][PATCH v%d' % (HubRepo.name, PatchSeriesVersion),
+                  CommitRange
+                  )
     #
-    # Remove first line from format-patch that is not part of email
+    # Remove first line from format-patch that is not part of email and parse
+    # the line ending style used by git format-patch
     #
-    Summary = ''.join(Summary.splitlines(keepends=True)[1:])
-
-    LineEnding = GetLineEnding (Summary[0])
-
-    #
-    # Parse the cover letter summary from git format-patch
-    #
-    Summary = Summary.split ('\n-- \n', 1)[0] + '\n-- \n'
+    Email = Email.splitlines(keepends=True)
+    LineEnding = GetLineEnding (Email[0])
+    Email = ''.join(Email[1:])
 
     #
-    # Add link to pull request
+    # Parse the email message and parse the message body discarding the file
+    # diffs leaving only the *** BLURB HERE *** and file change summary.
+    # Split the message body at *** BLURB HERE *** so the description of the
+    # pull request can inserted and leave the option to discard the file change
+    # summary.
     #
-    Blurb = []
-    Blurb.append('#' * 4 + LineEnding)
-    Blurb.append('# PR: ' + HubPullRequest.html_url + LineEnding)
+    Message = email.message_from_string(Email)
+    Pattern = '\n-- \n'
+    Body = Message.get_payload().split (Pattern, 1)[0] + Pattern
+    Body = Body.split ('*** BLURB HERE ***', 1)
 
     #
-    # Add list of assigned reviewers
+    # Add text with link to pull request and list of maintainers/reviewers
     #
-    for Address in AddressList:
-        Blurb.append('# ' + Address + LineEnding)
-    Blurb.append('#' * 4 + LineEnding)
-    Blurb.append(LineEnding)
+    Body[0] = Body[0] + MetaDataBlockText(
+                            HubPullRequest,
+                            None,
+                            AddressList,
+                            LineEnding
+                            )
 
     #
-    # Replace *** BLURB HERE *** with the pull request body
+    # Add the body from the pull request
     #
-    Summary = Summary.split ('*** BLURB HERE ***', 1)
-    Summary[0] = Summary[0] + ''.join(Blurb) + HubPullRequest.body
+    Body[0] = Body[0] + HubPullRequest.body
+
+    #
+    # If this is a comment against the description of the pull request
+    # then discard the file change summary and append the review comments
+    # quoting the decription of the pull request and all previous comments.
+    # Otherwise, this is a Patch #0 email that includes the file change summary.
+    #
     if CommentId:
-        Summary = Summary[0]
+        if event == 'pull_request_review_comment':
+            #
+            # If this is a pull request review comment then discard the file
+            # change summary and insert the review comments at the specified
+            # position in the pull request diff quoting the decription of the
+            # pull request, the diff, and all previous comments.
+            #
+
+            #
+            # Get the pull request review comments only keeping the comments
+            # that match the CommentPath and CommentPosition from this event
+            #
+            Comments = []
+            for Comment in HubPullRequest.get_review_comments():
+                if Comment.path == CommentPath and Comment.position == CommentPosition:
+                    Comments.append(Comment)
+
+            #
+            # Generate file diff for the commit range
+            #
+            Diff = '\n-- \n' + GitRepo.git.diff (CommitRange)
+
+            #
+            # Find the portion of the patch diffs that contain changes to the
+            # file specified by CommentPath
+            #
+            Start   = '\ndiff --git a/' + CommentPath + ' b/' + CommentPath + '\n'
+            End     = '\ndiff --git a/'
+            try:
+                Diff = Start + Diff.split(Start,1)[1].split(End,1)[0]
+                Diff = Diff.lstrip()
+            except:
+                Diff = Diff + 'ERROR: Pull request %d review comment to file %s position %d not found.\n' % (HubPullRequest.number, CommentPath, CommentPosition)
+
+            #
+            # Find the first line of the patch diff for file CommentPath that
+            # starts with '@@ '.
+            #
+            Diff = Diff.splitlines(keepends=True)
+            for LineNumber in range(0, len(Diff)):
+                if Diff[LineNumber].startswith('@@ '):
+                    break
+
+            #
+            # Insert comments into patch at CommentPosition + 1 lines after '@@ '
+            #
+            LineNumber = LineNumber + CommentPosition + 1
+            Body = QuoteCommentList (
+                       Comments,
+                       Before     = Body[0] + '\n-- \n' + ''.join(Diff[:LineNumber]),
+                       After      = ''.join(Diff[LineNumber:]),
+                       LineEnding = LineEnding,
+                       Prefix     = Prefix
+                       )
+        else:
+            #
+            # If this is a comment against the description of the pull request
+            # then discard the file change summary and append the review comments
+            # quoting the decription of the pull request and all previous comments.
+            #
+            Body = QuoteCommentList (
+                       HubPullRequest.get_issue_comments(),
+                       Before     = Body[0],
+                       LineEnding = LineEnding,
+                       Prefix     = Prefix
+                       )
     else:
-        Summary = Summary[0] + Summary[1]
-
-    #
-    # If Prefix is provided, then add to beginning of each line
-    #
-    if Prefix:
-        BodyFound = False
-        Summary = Summary.splitlines(keepends=True)
-        for LineNumber in range(0, len(Summary)):
-            if BodyFound:
-                Summary[LineNumber] = Prefix + Summary[LineNumber]
-                if CommentId:
-                    Summary[LineNumber] = Prefix + Summary[LineNumber]
-            if Summary[LineNumber].strip() == '':
-                BodyFound = True
-        Summary = ''.join(Summary)
-
-    if CommentId:
-        CommentText = ''
-        for Comment in HubPullRequest.get_issue_comments():
-            Text = 'On ' + str(Comment.created_at) + ' @' + Comment.user.login + ' wrote:' + LineEnding + Comment.body  + LineEnding
-            if Comment.id != CommentId:
-                Text = Prefix + Prefix.join(Text.splitlines(keepends=True))
-            CommentText = CommentText + Text
-        Summary = Summary + CommentText
+        #
+        # This is a Patch #0 email that includes the file change summary.
+        #
+        Body = Body[0] + Body[1]
 
     #
     # Update incorrect From: line in git format-patch cover letter
     # Replace *** SUBJECT HERE *** with the pull request title
     # Add Re: to Subject if comment is being processed
     #
-    Message = email.message_from_string(Summary)
     Message.replace_header('From', 'TianoCore <webhook@tianocore.org>')
     Message.replace_header('Subject', Message['Subject'].replace ('*** SUBJECT HERE ***', HubPullRequest.title))
-#    if CommentId:
-#        Message.replace_header('Subject', 'Re: [edk2codereview] ' + Message['Subject'])
+    Message.set_payload(Body)
 
     return Message.as_string()
