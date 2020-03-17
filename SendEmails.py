@@ -11,6 +11,7 @@ SendMails
 from __future__ import print_function
 
 import os
+import time
 import email
 import smtplib
 from sendgrid import SendGridAPIClient
@@ -44,9 +45,19 @@ def SendEmails (HubPullRequest, EmailContents, SendMethod):
             SmtpServer.starttls()
             SmtpServer.ehlo()
             SmtpServer.login(SMTP_USER_NAME, SMTP_PASSWORD)
+            Index = 0
             for Email in EmailContents:
+                Index = Index + 1
+                print ('pr[%d] email[%d]' % (HubPullRequest.number, Index), '----> SMTP Email Start <----')
                 print (Email)
-                SmtpServer.sendmail('webhook@tianocore.org', GROUPS_IO_ADDRESS, Email)
+                print ('pr[%d] email[%d]' % (HubPullRequest.number, Index), '----> SMTP Email End <----')
+                try:
+                    SmtpServer.sendmail('webhook@tianocore.org', GROUPS_IO_ADDRESS, Email)
+                    print ('SMTP send mail success')
+                    time.sleep(1)
+                except:
+                    print ('ERROR: SMTP send mail failed')
+
             SmtpServer.quit()
         except:
             print ('SendEmails: error: can not connect or login or send messages.')
@@ -54,7 +65,12 @@ def SendEmails (HubPullRequest, EmailContents, SendMethod):
         #
         # Send emails to SendGrid
         #
+        Index = 0
         for Email in EmailContents:
+            Index = Index + 1
+            print ('pr[%d] email[%d]' % (HubPullRequest.number, Index), '----> SendGrid Email Start <----')
+            print (Email)
+            print ('pr[%d] email[%d]' % (HubPullRequest.number, Index), '----> SendGrid Email End   <----')
             Email = email.message_from_string(Email)
             message = Mail()
             message.from_email = From('webhook@tianocore.org', 'TianoCore')
@@ -64,15 +80,13 @@ def SendEmails (HubPullRequest, EmailContents, SendMethod):
                 if Field in Email:
                     message.header = Header(Field, Email[Field])
             message.content = Content(MimeType.text, Email.get_payload())
-            print (message)
             try:
                 sendgrid_client = SendGridAPIClient(SENDGRID_API_KEY)
                 response = sendgrid_client.send(message)
-                print(response.status_code)
-                print(response.body)
-                print(response.headers)
+                print ('SendGridAPIClient send success')
+                time.sleep(1)
             except Exception as e:
-                print(e.body)
+                print ('ERROR: SendGridAPIClient failed')
     else:
         Index = 0
         for Email in EmailContents:
