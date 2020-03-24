@@ -138,6 +138,16 @@ def MetaDataBlockText(HubPullRequest, Commit, AddressList, LineEnding):
     Text = Text + '# PR: ' + HubPullRequest.html_url + LineEnding
 
     #
+    # Add base SHA value
+    #
+    Text = Text + '# Base SHA: ' + HubPullRequest.base.sha + LineEnding
+
+    #
+    # Add submitter
+    #
+    Text = Text + '# Submitter: [' + HubPullRequest.user.login + ']' + LineEnding
+
+    #
     # Add link to commit
     #
     if Commit is not None:
