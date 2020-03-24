@@ -74,7 +74,7 @@ def UpdatePullRequestCommitReviewers (Commit, GitHubIdList):
     #
     return AddReviewers != []
 
-def UpdatePullRequestReviewers (Hub, HubPullRequest, PullRequestGitHubIdList):
+def UpdatePullRequestReviewers (Hub, HubRepo, HubPullRequest, PullRequestGitHubIdList):
     #
     # Get list of reviewers already requested for the pull request
     #
@@ -93,13 +93,17 @@ def UpdatePullRequestReviewers (Hub, HubPullRequest, PullRequestGitHubIdList):
     # Determine if any reviewers need to be added
     #
     AddReviewerList = []
+    Collaborators = HubRepo.get_collaborators()
     for Login in PullRequestGitHubIdList:
         Reviewer = Hub.get_user(Login)
         if Reviewer == HubPullRequest.user:
             print ('pr[%d]' % (HubPullRequest.number), 'Reviewer is Author : @' + Reviewer.login)
         elif Reviewer not in RequestedReviewers:
-            print ('pr[%d]' % (HubPullRequest.number), 'Add Reviewer       : @' + Reviewer.login)
-            AddReviewerList.append (Reviewer.login)
+            if Reviewer in Collaborators:
+                print ('pr[%d]' % (HubPullRequest.number), 'Add Reviewer       : @' + Reviewer.login)
+                AddReviewerList.append (Reviewer.login)
+            else:
+                print ('pr[%d]' % (HubPullRequest.number), 'Reviewer is not a collaborator : @' + Reviewer.login)
         else:
             print ('pr[%d]' % (HubPullRequest.number), 'Already Assigned   : @' + Reviewer.login)
 
@@ -678,7 +682,7 @@ def index():
         #
         # Update the list of required reviewers for the pull request
         #
-        UpdatePullRequestReviewers (Hub, HubPullRequest, PullRequestGitHubIdList)
+        UpdatePullRequestReviewers (Hub, HubRepo, HubPullRequest, PullRequestGitHubIdList)
 
         #
         # If this is a new pull request or a forced push on a pull request, then
