@@ -179,32 +179,6 @@ def index():
         print(400, "Request parsing failed")
         abort(400, "Request parsing failed")
 
-    # Determining the branch can be tricky, as it only appears for certain event
-    # types, and at different levels
-    branch = None
-    try:
-        # Case 1: a ref_type indicates the type of ref.
-        # This true for create and delete events.
-        if 'ref_type' in payload:
-            if payload['ref_type'] == 'branch':
-                branch = payload['ref']
-
-        # Case 2: a pull_request object is involved. This is pull_request and
-        # pull_request_review_comment events.
-        elif 'pull_request' in payload:
-            # This is the TARGET branch for the pull-request, not the source
-            # branch
-            branch = payload['pull_request']['base']['ref']
-
-        elif event in ['push']:
-            # Push events provide a full Git ref in 'ref' and not a 'ref_type'.
-            branch = payload['ref'].split('/', 2)[2]
-
-    except KeyError:
-        # If the payload structure isn't what we expect, we'll live without
-        # the branch name
-        pass
-
     #
     # Skip push and create events
     #
@@ -213,17 +187,24 @@ def index():
         return dumps({'status': 'skipped'})
 
     #
+    # Skip payload that does not provide an action
+    #
+    if 'action' not in payload:
+        print ('skip payload that does not provide an action.  event =', event)
+        return dumps({'status': 'skipped'})
+
+    #
     # Skip payload that does not provide a repository
     #
     if 'repository' not in payload:
-        print ('skip payload that does not provide a repository', event)
+        print ('skip payload that does not provide a repository.  event=', event)
         return dumps({'status': 'skipped'})
 
     #
     # Skip payload that does not provide a repository full name
     #
     if 'full_name' not in payload['repository']:
-        print ('skip payload that does not provide a repository full name', event)
+        print ('skip payload that does not provide a repository full name.  event=', event)
         return dumps({'status': 'skipped'})
 
     #
