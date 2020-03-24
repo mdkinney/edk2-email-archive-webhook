@@ -213,7 +213,7 @@ def QuoteCommentList (Comments, Before = '', After = '', LineEnding = '\n', Pref
         Body = Body + QuoteText (After, Prefix, len(Comments))
     return Body
 
-def FormatPatch (event, GitRepo, HubRepo, HubPullRequest, Commit, AddressList, PatchSeriesVersion, PatchNumber, CommentType = None, CommentId = None, CommentPosition = None, CommentPath = None, Prefix = '', CommentInReplyToId = None):
+def FormatPatch (event, GitRepo, HubRepo, HubPullRequest, Commit, AddressList, PatchSeriesVersion, PatchNumber, CommentUser = None, CommentType = None, CommentId = None, CommentPosition = None, CommentPath = None, Prefix = '', CommentInReplyToId = None):
     #
     # Default range is a single commit
     #
@@ -229,7 +229,7 @@ def FormatPatch (event, GitRepo, HubRepo, HubPullRequest, Commit, AddressList, P
         if CommentInReplyToId:
             Email = GitRepo.git.format_patch (
                       '--stdout',
-                      '--from=TianoCore <webhook@tianocore.org>',
+                      '--from=%s via TianoCore Webhook <webhook@tianocore.org>' % (CommentUser),
                       '--add-header=In-Reply-To: <webhook-%s-pull%d-v%d-p%d-c%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, PatchNumber, CommentInReplyToId),
                       '--add-header=Message-ID: <webhook-%s-pull%d-v%d-p%d-c%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, PatchNumber, CommentId),
                       '--subject-prefix=%s][PATCH v%d %*d/%d' % (HubRepo.name, PatchSeriesVersion, len(str(HubPullRequest.commits)), PatchNumber, HubPullRequest.commits),
@@ -238,7 +238,7 @@ def FormatPatch (event, GitRepo, HubRepo, HubPullRequest, Commit, AddressList, P
         else:
             Email = GitRepo.git.format_patch (
                       '--stdout',
-                      '--from=TianoCore <webhook@tianocore.org>',
+                      '--from=%s via TianoCore Webhook <webhook@tianocore.org>' % (CommentUser),
                       '--add-header=In-Reply-To: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, PatchNumber),
                       '--add-header=Message-ID: <webhook-%s-pull%d-v%d-p%d-c%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, PatchNumber, CommentId),
                       '--subject-prefix=%s][PATCH v%d %*d/%d' % (HubRepo.name, PatchSeriesVersion, len(str(HubPullRequest.commits)), PatchNumber, HubPullRequest.commits),
@@ -247,7 +247,7 @@ def FormatPatch (event, GitRepo, HubRepo, HubPullRequest, Commit, AddressList, P
     else:
         Email = GitRepo.git.format_patch (
                   '--stdout',
-                  '--from=TianoCore <webhook@tianocore.org>',
+                  '--from=%s via TianoCore Webhook <webhook@tianocore.org>' % (HubPullRequest.user.login),
                   '--add-header=In-Reply-To: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0),
                   '--add-header=Message-ID: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, PatchNumber),
                   '--subject-prefix=%s][PATCH v%d %*d/%d' % (HubRepo.name, PatchSeriesVersion, len(str(HubPullRequest.commits)), PatchNumber, HubPullRequest.commits),
@@ -353,7 +353,7 @@ def FormatPatch (event, GitRepo, HubRepo, HubPullRequest, Commit, AddressList, P
     Message.set_payload(Body)
     return Message.as_string()
 
-def FormatPatchSummary (event, GitRepo, HubRepo, HubPullRequest, AddressList, PatchSeriesVersion, CommitRange = None, CommentId = None, CommentPosition = None, CommentPath = None, Prefix = '', CommentInReplyToId = None):
+def FormatPatchSummary (event, GitRepo, HubRepo, HubPullRequest, AddressList, PatchSeriesVersion, CommitRange = None, CommentUser = None, CommentId = None, CommentPosition = None, CommentPath = None, Prefix = '', CommentInReplyToId = None):
     #
     # Default range is the entire pull request
     #
@@ -367,11 +367,12 @@ def FormatPatchSummary (event, GitRepo, HubRepo, HubPullRequest, AddressList, Pa
     #   <webhook-<repo name>-pr<pull>-v<patch series version>-p<patch number>@tianocore.org>
     #
     if CommentId:
+        FromAddress = '%s via TianoCore Webhook <webhook@tianocore.org>' % (CommentUser)
         if CommentInReplyToId:
             Email = GitRepo.git.format_patch (
                       '--stdout',
                       '--cover-letter',
-                      '--from=TianoCore <webhook@tianocore.org>',
+                      '--from=' + FromAddress,
                       '--add-header=In-Reply-To: <webhook-%s-pull%d-v%d-p%d-c%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0, CommentInReplyToId),
                       '--add-header=Message-ID: <webhook-%s-pull%d-v%d-p%d-c%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0, CommentId),
                       '--subject-prefix=%s][PATCH v%d' % (HubRepo.name, PatchSeriesVersion),
@@ -381,17 +382,18 @@ def FormatPatchSummary (event, GitRepo, HubRepo, HubPullRequest, AddressList, Pa
             Email = GitRepo.git.format_patch (
                       '--stdout',
                       '--cover-letter',
-                      '--from=TianoCore <webhook@tianocore.org>',
+                      '--from=' + FromAddress,
                       '--add-header=In-Reply-To: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0),
                       '--add-header=Message-ID: <webhook-%s-pull%d-v%d-p%d-c%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0, CommentId),
                       '--subject-prefix=%s][PATCH v%d' % (HubRepo.name, PatchSeriesVersion),
                       CommitRange
                       )
     else:
+        FromAddress = '%s via TianoCore Webhook <webhook@tianocore.org>' % (HubPullRequest.user.login)
         Email = GitRepo.git.format_patch (
                   '--stdout',
                   '--cover-letter',
-                  '--from=TianoCore <webhook@tianocore.org>',
+                  '--from=' + FromAddress,
                   '--add-header=Message-ID: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0),
                   '--subject-prefix=%s][PATCH v%d' % (HubRepo.name, PatchSeriesVersion),
                   CommitRange
@@ -515,7 +517,7 @@ def FormatPatchSummary (event, GitRepo, HubRepo, HubPullRequest, AddressList, Pa
     # Replace *** SUBJECT HERE *** with the pull request title
     # Add Re: to Subject if comment is being processed
     #
-    Message.replace_header('From', 'TianoCore <webhook@tianocore.org>')
+    Message.replace_header('From', FromAddress)
     Message.replace_header('Subject', Message['Subject'].replace ('*** SUBJECT HERE ***', HubPullRequest.title))
     Message.set_payload(Body)
 

@@ -73,7 +73,14 @@ def SendEmails (HubPullRequest, EmailContents, SendMethod):
             print ('pr[%d] email[%d]' % (HubPullRequest.number, Index), '----> SendGrid Email End   <----')
             Email = email.message_from_string(Email)
             message = Mail()
-            message.from_email = From('webhook@tianocore.org', 'TianoCore')
+            try:
+                message.from_email = From(
+                   Email['From'].rsplit('<',1)[1].split('>',1)[0],
+                   Email['From'].rsplit('<',1)[0] + Email['From'].rsplit('>')[1]
+                   )
+            except:
+                print ('Bad from address')
+                message.from_email = From('webhook@tianocore.org', 'From %s via TianoCore Webhook' % (HubPullRequest.user.login))
             message.to = To(GROUPS_IO_ADDRESS, 'edk2codereview')
             message.subject = Subject(Email['Subject'])
             for Field in ['Message-Id', 'In-Reply-To']:
