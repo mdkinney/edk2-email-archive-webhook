@@ -215,6 +215,7 @@ def QuoteCommentList (Comments, Before = '', After = '', LineEnding = '\n', Pref
     if After:
         if After[-1] not in ['\n','\r']:
             After = After + LineEnding
+        Body = Body + '-' * 20 + LineEnding
         Body = Body + QuoteText (After, Prefix, len(Comments))
     return Body
 
