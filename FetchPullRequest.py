@@ -164,6 +164,8 @@ def MetaDataBlockText(HubPullRequest, Commit, AddressList, LineEnding):
     return Text
 
 def QuoteText (Text, Prefix, Depth):
+    if Depth <= 0:
+        return Text
     Text = Text.splitlines(keepends=True)
     return (Prefix * Depth) + (Prefix * Depth).join(Text)
 
@@ -174,6 +176,8 @@ def CommentAsEmailText(Comment, LineEnding, Prefix, Depth):
     #
     WrappedBody = []
     for Paragraph in Comment.body.splitlines(keepends=True):
+        PrefixDepth = int((len(Paragraph) - len(Paragraph.lstrip(Prefix))) / len(Prefix))
+        Paragraph = Paragraph.lstrip(Prefix)
         WrappedParagraph = textwrap.wrap(
                                Paragraph,
                                replace_whitespace=False,
@@ -181,7 +185,8 @@ def CommentAsEmailText(Comment, LineEnding, Prefix, Depth):
                                break_long_words=False,
                                break_on_hyphens=False
                                )
-        WrappedBody.append (LineEnding.join(WrappedParagraph))
+        WrappedParagraph = QuoteText (LineEnding.join(WrappedParagraph), Prefix, PrefixDepth)
+        WrappedBody.append (WrappedParagraph)
 
     String = 'On %s @%s wrote:%s%s' % (
                str(Comment.created_at),
@@ -191,7 +196,7 @@ def CommentAsEmailText(Comment, LineEnding, Prefix, Depth):
                )
     if String[-1] not in ['\n','\r']:
         String = String + LineEnding
-    return QuoteText (String, Prefix, Depth)
+    return '-' * 20 + LineEnding + QuoteText (String, Prefix, Depth)
 
 def QuoteCommentList (Comments, Before = '', After = '', LineEnding = '\n', Prefix = '> '):
     #
