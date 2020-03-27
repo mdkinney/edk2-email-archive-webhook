@@ -235,7 +235,23 @@ def QuoteCommentList (Comments, Before = '', After = '', LineEnding = '\n', Pref
         Body = Body + QuoteText (After, Prefix, len(Comments))
     return Body
 
-def FormatPatch (event, GitRepo, HubRepo, HubPullRequest, Commit, AddressList, PatchSeriesVersion, PatchNumber, CommentUser = None, CommentType = None, CommentId = None, CommentPosition = None, CommentPath = None, Prefix = '', CommentInReplyToId = None):
+def FormatPatch (
+        event,
+        GitRepo,
+        HubRepo,
+        HubPullRequest,
+        Commit,
+        AddressList,
+        PatchSeriesVersion,
+        PatchNumber,
+        CommentUser = None,
+        CommentType = None,
+        CommentId = None,
+        CommentPosition = None,
+        CommentPath = None,
+        Prefix = '',
+        CommentInReplyToId = None
+        ):
     #
     # Default range is a single commit
     #
@@ -375,7 +391,21 @@ def FormatPatch (event, GitRepo, HubRepo, HubPullRequest, Commit, AddressList, P
     Message.set_payload(Body)
     return Message.as_string()
 
-def FormatPatchSummary (event, GitRepo, HubRepo, HubPullRequest, AddressList, PatchSeriesVersion, CommitRange = None, CommentUser = None, CommentId = None, CommentPosition = None, CommentPath = None, Prefix = '', CommentInReplyToId = None):
+def FormatPatchSummary (
+        event,
+        GitRepo,
+        HubRepo,
+        HubPullRequest,
+        AddressList,
+        PatchSeriesVersion,
+        CommitRange = None,
+        CommentUser = None,
+        CommentId = None,
+        CommentPosition = None,
+        CommentPath = None,
+        Prefix = '',
+        CommentInReplyToId = None
+        ):
     #
     # Default range is the entire pull request
     #
