@@ -252,14 +252,14 @@ def index():
         # Skip pull request with a base repo that is different than the expected repo
         #
         if HubPullRequest.base.repo.full_name != HubRepo.full_name:
-            print ('Skip PR event against a different repo', HubPullRequest.base.repo.full_name)
+            print ('Skip issue_comment event against a different repo', HubPullRequest.base.repo.full_name)
             return dumps({'status': 'skipped'})
 
         #
         # Skip pull requests with a base branch that is not the default branch
         #
         if HubPullRequest.base.ref != HubRepo.default_branch:
-            print ('Skip PR event against non-default base branch', HubPullRequest.base.ref)
+            print ('Skip issue_comment event against non-default base branch', HubPullRequest.base.ref)
             return dumps({'status': 'skipped'})
 
         #
@@ -267,6 +267,9 @@ def index():
         # object and the contents of Maintainers.txt
         #
         GitRepo, Maintainers = FetchPullRequest (HubPullRequest)
+        if GitRepo is None or Maintainers is None:
+            print ('Skip issue_comment event that can not be fetched')
+            return dumps({'status': 'skipped'})
 
         #
         # Count head_ref_force_pushed events to determine the version of
@@ -387,6 +390,9 @@ def index():
             # object and the contents of Maintainers.txt
             #
             GitRepo, Maintainers = FetchPullRequest (HubPullRequest)
+            if GitRepo is None or Maintainers is None:
+                print ('Skip commit_comment event that can not be fetched')
+                continue
 
             #
             # Count head_ref_force_pushed events to determine the version of
@@ -450,7 +456,7 @@ def index():
 
     ############################################################################
     # Process pull_request_review_comment events
-    # Quote Patch #n commit message and add comment below below with commenters GitHubID
+    # Quote Patch #0 commit message and patch diff of file comment is against
     ############################################################################
     if event == 'pull_request_review_comment':
         action = payload['action']
@@ -509,6 +515,9 @@ def index():
         # object and the contents of Maintainers.txt
         #
         GitRepo, Maintainers = FetchPullRequest (HubPullRequest)
+        if GitRepo is None or Maintainers is None:
+            print ('Skip pull_request_review_comment event that can not be fetched')
+            return dumps({'status': 'skipped'})
 
         #
         # Count head_ref_force_pushed events to determine the version of
@@ -611,6 +620,9 @@ def index():
         # object and the contents of Maintainers.txt
         #
         GitRepo, Maintainers = FetchPullRequest (HubPullRequest)
+        if GitRepo is None or Maintainers is None:
+            print ('Skip pull_request_review event that can not be fetched')
+            return dumps({'status': 'skipped'})
 
         NewPatchSeries = False
         PatchSeriesVersion = 1;

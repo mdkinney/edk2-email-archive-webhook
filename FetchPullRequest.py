@@ -34,30 +34,46 @@ def FetchPullRequest (HubPullRequest, Depth = 200):
     #
     RepositoryPath = os.path.normpath (os.path.join ('Repository', HubPullRequest.base.repo.full_name))
     if os.path.exists (RepositoryPath):
-        print ('pr[%d]' % (HubPullRequest.number), 'mount', RepositoryPath)
         try:
+            print ('pr[%d]' % (HubPullRequest.number), 'mount', RepositoryPath)
             GitRepo = git.Repo(RepositoryPath)
             Origin = GitRepo.remotes['origin']
         except:
+            try:
+                print ('pr[%d]' % (HubPullRequest.number), 'init', RepositoryPath)
+                GitRepo = git.Repo.init (RepositoryPath, bare=True)
+                Origin = GitRepo.create_remote ('origin', HubPullRequest.base.repo.html_url)
+            except:
+                print ('pr[%d]' % (HubPullRequest.number), 'init', RepositoryPath, 'FAILED')
+                return None, None
+    else:
+        try:
             print ('pr[%d]' % (HubPullRequest.number), 'init', RepositoryPath)
+            os.makedirs (RepositoryPath)
             GitRepo = git.Repo.init (RepositoryPath, bare=True)
             Origin = GitRepo.create_remote ('origin', HubPullRequest.base.repo.html_url)
-    else:
-        print ('pr[%d]' % (HubPullRequest.number), 'init', RepositoryPath)
-        os.makedirs (RepositoryPath)
-        GitRepo = git.Repo.init (RepositoryPath, bare=True)
-        Origin = GitRepo.create_remote ('origin', HubPullRequest.base.repo.html_url)
+        except:
+            print ('pr[%d]' % (HubPullRequest.number), 'init', RepositoryPath, 'FAILED')
+            return None, None
     #
     # Shallow fetch base.ref branch from origin
     #
-    print ('pr[%d]' % (HubPullRequest.number), 'fetch', HubPullRequest.base.ref, 'from', RepositoryPath)
-    Origin.fetch(HubPullRequest.base.ref, progress=Progress(), depth = Depth)
+    try:
+        print ('pr[%d]' % (HubPullRequest.number), 'fetch', HubPullRequest.base.ref, 'from', RepositoryPath)
+        Origin.fetch(HubPullRequest.base.ref, progress=Progress(), depth = Depth)
+    except:
+        print ('pr[%d]' % (HubPullRequest.number), 'fetch', HubPullRequest.base.ref, 'from', RepositoryPath, 'FAILED')
+        return None, None
     #
     # Fetch the current pull request branch from origin
     #
-    print ('pr[%d]' % (HubPullRequest.number), 'fetch pull request', HubPullRequest.number, 'from', RepositoryPath)
-    Origin.fetch('+refs/pull/%d/merge:refs/remotes/origin/pr/%d' % (HubPullRequest.number, HubPullRequest.number), progress=Progress())
-    print ('pr[%d]' % (HubPullRequest.number), 'fetch', RepositoryPath, 'done')
+    try:
+        print ('pr[%d]' % (HubPullRequest.number), 'fetch pull request', HubPullRequest.number, 'from', RepositoryPath)
+        Origin.fetch('+refs/pull/%d/merge:refs/remotes/origin/pr/%d' % (HubPullRequest.number, HubPullRequest.number), progress=Progress())
+        print ('pr[%d]' % (HubPullRequest.number), 'fetch', RepositoryPath, 'done')
+    except:
+        print ('pr[%d]' % (HubPullRequest.number), 'fetch pull request', HubPullRequest.number, 'from', RepositoryPath, 'NOT FOUND')
+        return None, None
 
     #
     # Retrieve the latest version of Maintainers.txt from origin/base.ref
