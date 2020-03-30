@@ -632,7 +632,7 @@ def index():
             # New pull request was created
             #
             NewPatchSeries = True
-        if action in ['synchronize', 'reopened']:
+        if action in ['synchronize', 'edited', 'reopened']:
             #
             # Existing pull request was updated.
             # Commits were added to an existing pull request or an existing pull
