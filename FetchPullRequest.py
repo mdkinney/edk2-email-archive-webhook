@@ -193,8 +193,10 @@ def CommentAsEmailText(Comment, LineEnding, Prefix, Depth):
     WrappedBody = []
     if Comment.body is not None:
         for Paragraph in Comment.body.splitlines(keepends=True):
-            PrefixDepth = int((len(Paragraph) - len(Paragraph.lstrip(Prefix))) / len(Prefix))
-            Paragraph = Paragraph.lstrip(Prefix)
+            PrefixDepth = 0
+            while Paragraph.startswith (Prefix):
+                Paragraph = Paragraph[len(Prefix):]
+                PrefixDepth = PrefixDepth + 1
             WrappedParagraph = textwrap.wrap(
                                    Paragraph,
                                    replace_whitespace=False,
@@ -202,7 +204,13 @@ def CommentAsEmailText(Comment, LineEnding, Prefix, Depth):
                                    break_long_words=False,
                                    break_on_hyphens=False
                                    )
-            WrappedParagraph = QuoteText (LineEnding.join(WrappedParagraph), Prefix, PrefixDepth)
+            Length = len(WrappedParagraph[0]) - len(WrappedParagraph[0].lstrip(' '))
+            WrappedParagraph = [X.lstrip(' ') for X in WrappedParagraph]
+            if len(WrappedParagraph) > 1 and WrappedParagraph[-1].rstrip() == '':
+                WrappedParagraph[-2] = WrappedParagraph[-2] + WrappedParagraph[-1]
+                WrappedParagraph = WrappedParagraph[:-1]
+            WrappedParagraph = QuoteText (LineEnding.join(WrappedParagraph), ' ', Length)
+            WrappedParagraph = QuoteText (WrappedParagraph, Prefix, PrefixDepth)
             WrappedBody.append (WrappedParagraph)
 
     String = 'On %s @%s wrote:%s%s' % (
@@ -485,7 +493,21 @@ def FormatPatchSummary (
     # Add the body from the pull request
     #
     if HubPullRequest.body is not None:
-        Body[0] = Body[0] + HubPullRequest.body
+        for Paragraph in HubPullRequest.body.splitlines(keepends=True):
+            WrappedParagraph = textwrap.wrap(
+                                   Paragraph,
+                                   replace_whitespace=False,
+                                   drop_whitespace=False,
+                                   break_long_words=False,
+                                   break_on_hyphens=False
+                                   )
+            Length = len(WrappedParagraph[0]) - len(WrappedParagraph[0].lstrip(' '))
+            WrappedParagraph = [X.lstrip(' ') for X in WrappedParagraph]
+            if len(WrappedParagraph) > 1 and WrappedParagraph[-1].rstrip() == '':
+                WrappedParagraph[-2] = WrappedParagraph[-2] + WrappedParagraph[-1]
+                WrappedParagraph = WrappedParagraph[:-1]
+            WrappedParagraph = QuoteText (LineEnding.join(WrappedParagraph), ' ', Length)
+            Body[0] = Body[0] + WrappedParagraph
 
     #
     # If this is a comment against the description of the pull request
