@@ -585,7 +585,7 @@ def index():
     ############################################################################
     if event == 'pull_request':
         action = payload['action']
-        if action not in ['opened', 'synchronize', 'edited']:
+        if action not in ['opened', 'synchronize', 'edited', 'reopened']:
             print ('skip pull_request event with action other than opened or synchronized')
             return dumps({'status': 'skipped'})
 
@@ -632,7 +632,7 @@ def index():
             # New pull request was created
             #
             NewPatchSeries = True
-        if action == 'synchronize':
+        if action in ['synchronize', 'reopened']:
             #
             # Existing pull request was updated.
             # Commits were added to an existing pull request or an existing pull
@@ -641,16 +641,17 @@ def index():
             Events = HubPullRequest.get_issue_events()
             for Event in Events:
                 #
-                # Count head_ref_force_pushed events to determine the version of
-                # the patch series.
+                # Count head_ref_force_pushed and reopened events to determine
+                # the version of the patch series.
                 #
-                if Event.event == 'head_ref_force_pushed':
+                if Event.event in  ['head_ref_force_pushed', 'reopened']:
                     PatchSeriesVersion = PatchSeriesVersion + 1;
                     #
-                    # If the head_ref_force_pushed event occurred at the exact
-                    # same date/time (or within 2 seconds) that the pull request
-                    # was updated, then this was a forced push and the entire
-                    # patch series should be emailed again.
+                    # If the head_ref_force_pushed or reopened event occurred at
+                    # the exact same date/time (or within 2 seconds) that the
+                    # pull request was updated, then this was a forced push or
+                    # reopen and the entire patch series should be emailed
+                    # again.
                     #
                     if abs(Event.created_at - HubPullRequest.updated_at).seconds <= 2:
                         NewPatchSeries = True
