@@ -273,13 +273,13 @@ def index():
             return dumps({'status': 'skipped'})
 
         #
-        # Count head_ref_force_pushed events to determine the version of
-        # the patch series.
+        # Count head_ref_force_pushed and reopened events to determine the
+        # version of the patch series.
         #
         PatchSeriesVersion = 1;
         Events = HubPullRequest.get_issue_events()
         for Event in Events:
-            if Event.event == 'head_ref_force_pushed':
+            if Event.event in ['head_ref_force_pushed', 'reopened']:
                 PatchSeriesVersion = PatchSeriesVersion + 1;
 
 
@@ -396,13 +396,13 @@ def index():
                 continue
 
             #
-            # Count head_ref_force_pushed events to determine the version of
-            # the patch series.
+            # Count head_ref_force_pushed and reopened events to determine the
+            # version of the patch series.
             #
             PatchSeriesVersion = 1;
             Events = HubPullRequest.get_issue_events()
             for Event in Events:
-                if Event.event == 'head_ref_force_pushed':
+                if Event.event in ['head_ref_force_pushed', 'reopened']:
                     PatchSeriesVersion = PatchSeriesVersion + 1;
 
             #
@@ -521,13 +521,13 @@ def index():
             return dumps({'status': 'skipped'})
 
         #
-        # Count head_ref_force_pushed events to determine the version of
-        # the patch series.
+        # Count head_ref_force_pushed and reopened events to determine the
+        # version of the patch series.
         #
         PatchSeriesVersion = 1;
         Events = HubPullRequest.get_issue_events()
         for Event in Events:
-            if Event.event == 'head_ref_force_pushed':
+            if Event.event in ['head_ref_force_pushed', 'reopened']:
                 PatchSeriesVersion = PatchSeriesVersion + 1;
 
         #
