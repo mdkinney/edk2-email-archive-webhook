@@ -585,7 +585,7 @@ def index():
     ############################################################################
     if event == 'pull_request':
         action = payload['action']
-        if action not in ['opened', 'synchronize']:
+        if action not in ['opened', 'synchronize', 'edited']:
             print ('skip pull_request event with action other than opened or synchronized')
             return dumps({'status': 'skipped'})
 
@@ -705,7 +705,7 @@ def index():
         # generate the summary email patch #0 and add to be beginning of the
         # list of emails to send.
         #
-        if NewPatchSeries:
+        if NewPatchSeries or action =='edited':
             Summary = FormatPatchSummary (
                           event,
                           GitRepo,
