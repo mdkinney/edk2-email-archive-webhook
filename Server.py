@@ -250,6 +250,13 @@ def index():
             return dumps({'status': 'skipped'})
 
         #
+        # Skip pull request that is not open
+        #
+        if HubPullRequest.state != 'open':
+            print ('Skip issue_comment event against a pull request that is not open')
+            return dumps({'status': 'skipped'})
+
+        #
         # Skip pull request with a base repo that is different than the expected repo
         #
         if HubPullRequest.base.repo.full_name != HubRepo.full_name:
@@ -371,6 +378,13 @@ def index():
             except:
                 print ('skip commit_comment event for which the PyGitHub objects can not be retrieved')
                 continue
+
+            #
+            # Skip pull request that is not open
+            #
+            if HubPullRequest.state != 'open':
+                print ('Skip commit_comment event against a pull request that is not open')
+                return dumps({'status': 'skipped'})
 
             #
             # Skip commit_comment with a base repo that is different than the expected repo
@@ -498,6 +512,13 @@ def index():
             return dumps({'status': 'skipped'})
 
         #
+        # Skip pull request that is not open
+        #
+        if HubPullRequest.state != 'open':
+            print ('Skip pull_request_review_comment event against a pull request that is not open')
+            return dumps({'status': 'skipped'})
+
+        #
         # Skip pull_request_review_comment with a base repo that is different than the expected repo
         #
         if HubPullRequest.base.repo.full_name != HubRepo.full_name:
@@ -600,6 +621,13 @@ def index():
             # Skip requests if the PyGitHub objects can not be retrieved
             #
             print ('skip pull_request event for which the PyGitHub objects can not be retrieved')
+            return dumps({'status': 'skipped'})
+
+        #
+        # Skip pull request that is not open
+        #
+        if HubPullRequest.state != 'open':
+            print ('Skip pull_request event against a pull request that is not open')
             return dumps({'status': 'skipped'})
 
         #
