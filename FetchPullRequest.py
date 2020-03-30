@@ -191,18 +191,19 @@ def CommentAsEmailText(Comment, LineEnding, Prefix, Depth):
     # contain hyphens.
     #
     WrappedBody = []
-    for Paragraph in Comment.body.splitlines(keepends=True):
-        PrefixDepth = int((len(Paragraph) - len(Paragraph.lstrip(Prefix))) / len(Prefix))
-        Paragraph = Paragraph.lstrip(Prefix)
-        WrappedParagraph = textwrap.wrap(
-                               Paragraph,
-                               replace_whitespace=False,
-                               drop_whitespace=False,
-                               break_long_words=False,
-                               break_on_hyphens=False
-                               )
-        WrappedParagraph = QuoteText (LineEnding.join(WrappedParagraph), Prefix, PrefixDepth)
-        WrappedBody.append (WrappedParagraph)
+    if Comment.body is not None:
+        for Paragraph in Comment.body.splitlines(keepends=True):
+            PrefixDepth = int((len(Paragraph) - len(Paragraph.lstrip(Prefix))) / len(Prefix))
+            Paragraph = Paragraph.lstrip(Prefix)
+            WrappedParagraph = textwrap.wrap(
+                                   Paragraph,
+                                   replace_whitespace=False,
+                                   drop_whitespace=False,
+                                   break_long_words=False,
+                                   break_on_hyphens=False
+                                   )
+            WrappedParagraph = QuoteText (LineEnding.join(WrappedParagraph), Prefix, PrefixDepth)
+            WrappedBody.append (WrappedParagraph)
 
     String = 'On %s @%s wrote:%s%s' % (
                str(Comment.created_at),
@@ -483,7 +484,8 @@ def FormatPatchSummary (
     #
     # Add the body from the pull request
     #
-    Body[0] = Body[0] + HubPullRequest.body
+    if HubPullRequest.body is not None:
+        Body[0] = Body[0] + HubPullRequest.body
 
     #
     # If this is a comment against the description of the pull request
@@ -570,7 +572,8 @@ def FormatPatchSummary (
     # Add Re: to Subject if comment is being processed
     #
     Message.replace_header('From', FromAddress)
-    Message.replace_header('Subject', Message['Subject'].replace ('*** SUBJECT HERE ***', HubPullRequest.title))
+    if HubPullRequest.title is not None:
+        Message.replace_header('Subject', Message['Subject'].replace ('*** SUBJECT HERE ***', HubPullRequest.title))
     Message.set_payload(Body)
 
     return Message.as_string()

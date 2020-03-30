@@ -51,7 +51,8 @@ def UpdatePullRequestCommitReviewers (Commit, GitHubIdList):
     #
     Body = []
     for Comment in Commit.get_comments():
-        Body = Body + [Line.strip() for Line in Comment.body.splitlines()]
+        if Comment.body is not None:
+            Body = Body + [Line.strip() for Line in Comment.body.splitlines()]
 
     #
     # Determine if any reviewers need to be added to this commit
