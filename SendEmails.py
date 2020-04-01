@@ -28,12 +28,11 @@ from sendgrid.helpers.mail import (
     OpenTracking, OpenTrackingSubstitutionTag, Ganalytics,
     UtmSource, UtmMedium, UtmTerm, UtmContent, UtmCampaign)
 
-SMTP_ADDRESS           = os.environ['SMTP_ADDRESS']
-SMTP_PORT_NUMBER       = int(os.environ['SMTP_PORT_NUMBER'])
-SMTP_USER_NAME         = os.environ['SMTP_USER_NAME']
-SMTP_PASSWORD          = os.environ['SMTP_PASSWORD']
-GROUPS_IO_ADDRESS      = os.environ['GROUPS_IO_ADDRESS']
-SENDGRID_API_KEY       = os.environ['SENDGRID_API_KEY']
+SMTP_ADDRESS     = os.environ['SMTP_ADDRESS']
+SMTP_PORT_NUMBER = int(os.environ['SMTP_PORT_NUMBER'])
+SMTP_USER_NAME   = os.environ['SMTP_USER_NAME']
+SMTP_PASSWORD    = os.environ['SMTP_PASSWORD']
+SENDGRID_API_KEY = os.environ['SENDGRID_API_KEY']
 
 def SendEmails (HubPullRequest, EmailContents, SendMethod):
     if SendMethod == 'SMTP':
@@ -48,11 +47,12 @@ def SendEmails (HubPullRequest, EmailContents, SendMethod):
             Index = 0
             for Email in EmailContents:
                 Index = Index + 1
+                EmailMessage = email.message_from_string(Email)
                 print ('pr[%d] email[%d]' % (HubPullRequest.number, Index), '----> SMTP Email Start <----')
                 print (Email)
                 print ('pr[%d] email[%d]' % (HubPullRequest.number, Index), '----> SMTP Email End <----')
                 try:
-                    SmtpServer.sendmail('webhook@tianocore.org', GROUPS_IO_ADDRESS, Email)
+                    SmtpServer.sendmail('webhook@tianocore.org', [EmailMessage['To']], Email)
                     print ('SMTP send mail success')
                     time.sleep(1)
                 except:
@@ -68,25 +68,32 @@ def SendEmails (HubPullRequest, EmailContents, SendMethod):
         Index = 0
         for Email in EmailContents:
             Index = Index + 1
+            EmailMessage = email.message_from_string(Email)
             print ('pr[%d] email[%d]' % (HubPullRequest.number, Index), '----> SendGrid Email Start <----')
             print (Email)
             print ('pr[%d] email[%d]' % (HubPullRequest.number, Index), '----> SendGrid Email End   <----')
-            Email = email.message_from_string(Email)
             message = Mail()
             try:
                 message.from_email = From(
-                   Email['From'].rsplit('<',1)[1].split('>',1)[0],
-                   Email['From'].rsplit('<',1)[0] + Email['From'].rsplit('>')[1]
+                   EmailMessage['From'].rsplit('<',1)[1].split('>',1)[0],
+                   EmailMessage['From'].rsplit('<',1)[0] + EmailMessage['From'].rsplit('>')[1]
                    )
             except:
                 print ('Bad from address')
                 message.from_email = From('webhook@tianocore.org', 'From %s via TianoCore Webhook' % (HubPullRequest.user.login))
-            message.to = To(GROUPS_IO_ADDRESS, 'edk2codereview')
-            message.subject = Subject(Email['Subject'])
+            try:
+                message.to = To(
+                   EmailMessage['To'].rsplit('<',1)[1].split('>',1)[0],
+                   EmailMessage['To'].rsplit('<',1)[0] + EmailMessage['To'].rsplit('>')[1]
+                   )
+            except:
+                print ('Bad to address')
+                continue
+            message.subject = Subject(EmailMessage['Subject'])
             for Field in ['Message-Id', 'In-Reply-To']:
-                if Field in Email:
-                    message.header = Header(Field, Email[Field])
-            message.content = Content(MimeType.text, Email.get_payload())
+                if Field in EmailMessage:
+                    message.header = Header(Field, EmailMessage[Field])
+            message.content = Content(MimeType.text, EmailMessage.get_payload())
             try:
                 sendgrid_client = SendGridAPIClient(SENDGRID_API_KEY)
                 response = sendgrid_client.send(message)
@@ -98,6 +105,7 @@ def SendEmails (HubPullRequest, EmailContents, SendMethod):
         Index = 0
         for Email in EmailContents:
             Index = Index + 1
+            EmailMessage = email.message_from_string(Email)
             print ('pr[%d] email[%d]' % (HubPullRequest.number, Index), '----> Draft Email Start <----')
             print (Email)
             print ('pr[%d] email[%d]' % (HubPullRequest.number, Index), '----> Draft Email End   <----')
