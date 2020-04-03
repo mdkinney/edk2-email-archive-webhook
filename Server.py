@@ -16,6 +16,7 @@ import os
 import sys
 import argparse
 import hmac
+import datetime
 from json import dumps
 from flask import Flask, request, abort
 from github import Github
@@ -229,7 +230,7 @@ def index():
     ############################################################################
     if event == 'issue_comment':
         action = payload['action']
-        if action not in ['created', 'edited']:
+        if action not in ['created', 'edited', 'deleted']:
             print ('skip issue_comment event with action other than created or edited')
             return dumps({'status': 'skipped'})
         if 'pull_request' not in payload['issue']:
@@ -307,6 +308,17 @@ def index():
         #
         # Generate the summary email patch #0 with body of email prefixed with >.
         #
+        UpdateDeltaTime = 0
+        if action == 'edited':
+            #
+            # The delta time is the number of seconds from the time the comment
+            # was created to the time the comment was edited
+            #
+            UpdatedAt = datetime.datetime.strptime(payload['comment']['updated_at'], "%Y-%m-%dT%H:%M:%SZ")
+            CreatedAt = datetime.datetime.strptime(payload['comment']['created_at'], "%Y-%m-%dT%H:%M:%SZ")
+            UpdateDeltaTime = (UpdatedAt - CreatedAt).seconds
+        if action == 'deleted':
+            UpdateDeltaTime = -1
         Summary = FormatPatchSummary (
                     event,
                     GitRepo,
@@ -319,7 +331,8 @@ def index():
                     CommentId = payload['comment']['id'],
                     CommentPosition = None,
                     CommentPath = None,
-                    Prefix = '> '
+                    Prefix = '> ',
+                    UpdateDeltaTime = UpdateDeltaTime
                     )
 
         #
@@ -575,6 +588,11 @@ def index():
         #
         # Generate the summary email patch #0 with body of email prefixed with >.
         #
+        UpdateDeltaTime = 0
+        if action =='edited':
+            UpdatedAt = datetime.datetime.strptime(payload['comment']['updated_at'], "%Y-%m-%dT%H:%M:%SZ")
+            CreatedAt = datetime.datetime.strptime(payload['comment']['created_at'], "%Y-%m-%dT%H:%M:%SZ")
+            UpdateDeltaTime = (UpdatedAt - CreatedAt).seconds
         Email = FormatPatchSummary (
                   event,
                   GitRepo,
@@ -588,7 +606,8 @@ def index():
                   CommentPosition = CommentPosition,
                   CommentPath = CommentPath,
                   Prefix = '> ',
-                  CommentInReplyToId = CommentInReplyToId
+                  CommentInReplyToId = CommentInReplyToId,
+                  UpdateDeltaTime = UpdateDeltaTime
                   )
 
         EmailContents.append (Email)
@@ -606,7 +625,7 @@ def index():
     ############################################################################
     if event == 'pull_request':
         action = payload['action']
-        if action not in ['opened', 'synchronize', 'edited', 'reopened']:
+        if action not in ['opened', 'synchronize', 'edited', 'closed', 'reopened']:
             print ('skip pull_request event with action other than opened or synchronized')
             return dumps({'status': 'skipped'})
 
@@ -624,11 +643,13 @@ def index():
             return dumps({'status': 'skipped'})
 
         #
-        # Skip pull request that is not open
+        # Skip pull request that is not open unless this is the event that is
+        # closing the pull request
         #
-        if HubPullRequest.state != 'open':
-            print ('Skip pull_request event against a pull request that is not open')
-            return dumps({'status': 'skipped'})
+        if action != 'closed':
+            if HubPullRequest.state != 'open':
+                print ('Skip pull_request event against a pull request that is not open')
+                return dumps({'status': 'skipped'})
 
         #
         # Skip pull request with a base repo that is different than the expected repo
@@ -655,12 +676,12 @@ def index():
 
         NewPatchSeries = False
         PatchSeriesVersion = 1;
-        if action == 'opened':
+        if action in ['opened', 'reopened']:
             #
             # New pull request was created
             #
             NewPatchSeries = True
-        if action in ['synchronize', 'edited', 'reopened']:
+        if action in ['synchronize', 'edited', 'closed', 'reopened']:
             #
             # Existing pull request was updated.
             # Commits were added to an existing pull request or an existing pull
@@ -674,14 +695,14 @@ def index():
                 #
                 if Event.event in  ['head_ref_force_pushed', 'reopened']:
                     PatchSeriesVersion = PatchSeriesVersion + 1;
+                if Event.event in  ['head_ref_force_pushed']:
                     #
-                    # If the head_ref_force_pushed or reopened event occurred at
-                    # the exact same date/time (or within 2 seconds) that the
-                    # pull request was updated, then this was a forced push or
-                    # reopen and the entire patch series should be emailed
-                    # again.
+                    # If the head_ref_force_pushed event occurred at the exact
+                    # same date/time (or within 2 seconds) that the pull request
+                    # was updated, then this was a forced push and the entire
+                    # patch series should be emailed again.
                     #
-                    if abs(Event.created_at - HubPullRequest.updated_at).seconds <= 2:
+                    if abs(Event.updated_at - HubPullRequest.created_at).seconds <= 2:
                         NewPatchSeries = True
 
         PullRequestAddressList = []
@@ -721,7 +742,16 @@ def index():
             # occurs when when new commits are added to an existing pull request.
             #
             if NewPatchSeries or ReviewersUpdated:
-                Email = FormatPatch (event, GitRepo, HubRepo, HubPullRequest, Commit, AddressList, PatchSeriesVersion, PatchNumber)
+                Email = FormatPatch (
+                            event,
+                            GitRepo,
+                            HubRepo,
+                            HubPullRequest,
+                            Commit,
+                            AddressList,
+                            PatchSeriesVersion,
+                            PatchNumber
+                            )
                 EmailContents.append (Email)
 
         #
@@ -730,21 +760,25 @@ def index():
         UpdatePullRequestReviewers (Hub, HubRepo, HubPullRequest, PullRequestGitHubIdList)
 
         #
-        # If this is a new pull request or a forced push on a pull request, then
-        # generate the summary email patch #0 and add to be beginning of the
-        # list of emails to send.
+        # If this is a new pull request or a forced push on a pull request or an
+        # edit of the pulle request title or description, then generate the
+        # summary email patch #0 and add to be beginning of the list of emails
+        # to send.
         #
-        if NewPatchSeries or action =='edited':
+        if NewPatchSeries or action in ['edited', 'closed']:
+            UpdateDeltaTime = 0
+            if action in ['edited', 'closed']:
+                UpdateDeltaTime = (HubPullRequest.updated_at - HubPullRequest.created_at).seconds
             Summary = FormatPatchSummary (
                           event,
                           GitRepo,
                           HubRepo,
                           HubPullRequest,
                           PullRequestAddressList,
-                          PatchSeriesVersion
+                          PatchSeriesVersion,
+                          UpdateDeltaTime = UpdateDeltaTime
                           )
             EmailContents.insert (0, Summary)
-
         #
         # Send any generated emails
         #
