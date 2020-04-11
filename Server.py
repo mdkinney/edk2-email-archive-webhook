@@ -702,7 +702,7 @@ def index():
                     # was updated, then this was a forced push and the entire
                     # patch series should be emailed again.
                     #
-                    if abs(HubPullRequest.updated_at - HubPullRequest.created_at).seconds <= 2:
+                    if abs(Event.created_at - HubPullRequest.updated_at).seconds <= 2:
                         NewPatchSeries = True
 
         PullRequestAddressList = []
