@@ -139,6 +139,20 @@ def FetchAllPullRequests (HubRepo, CommitId = None, Depth = 200):
 
     return GitRepo, Maintainers, PullRequestList
 
+def ParseCcLines(Body):
+    AddressList = []
+    for Line in Body.splitlines():
+        if Line.lower().startswith ('cc:'):
+            Address = Line[3:].strip()
+            if ',' in Address:
+                continue
+            if '<' not in Address or '>' not in Address:
+                continue
+            if '@' not in Address.rsplit('<',1)[1].split('>',1)[0]:
+                continue
+            AddressList.append(Address)
+    return AddressList
+
 def GetLineEnding (Line):
     if Line.endswith('\r\n'):
         return '\r\n'
@@ -325,6 +339,11 @@ def FormatPatch (
     Body[0] = Body[0] + Pattern
 
     #
+    # Parse the Cc: lines from the commit message
+    #
+    CcAddressList = ParseCcLines (Body[0])
+
+    #
     # Add text with links to pull request and the commit along with the list
     # of maintainers/reviewers for this specific commit after the '\n---\n'
     # marker so this meta data is not part of the commit message or the patch
@@ -403,7 +422,10 @@ def FormatPatch (
     else:
         Body = Body[0] + Body[1]
 
+    if CcAddressList:
+        Message.add_header('Cc', ','.join(CcAddressList))
     Message.set_payload(Body)
+
     return Message.as_string()
 
 def FormatPatchSummary (
@@ -539,7 +561,9 @@ def FormatPatchSummary (
     #
     # Add the body from the pull request
     #
+    CcAddressList = []
     if HubPullRequest.body is not None:
+        CcAddressList = ParseCcLines (HubPullRequest.body)
         for Paragraph in HubPullRequest.body.splitlines(keepends=True):
             WrappedParagraph = textwrap.wrap(
                                    Paragraph,
@@ -643,6 +667,8 @@ def FormatPatchSummary (
     Message.replace_header('From', FromAddress)
     if HubPullRequest.title is not None:
         Message.replace_header('Subject', Message['Subject'].replace ('*** SUBJECT HERE ***', HubPullRequest.title))
+    if CcAddressList:
+        Message.add_header('Cc', ','.join(CcAddressList))
     Message.set_payload(Body)
 
     return Message.as_string()
