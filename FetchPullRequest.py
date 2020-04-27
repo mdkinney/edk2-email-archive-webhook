@@ -192,12 +192,21 @@ def CommentAsEmailText(Comment, LineEnding, Prefix, Depth):
                                    )
             WrappedBody.append (WrappedParagraph)
 
-    String = 'On %s @%s wrote:%s%s' % (
-                 str(Comment.created_at),
-                 Comment.user.login,
-                 LineEnding,
-                 ''.join(WrappedBody)
-                 )
+    if hasattr(Comment, 'state'):
+        String = 'On %s @%s started a review with state %s:%s%s' % (
+                     str(Comment.submitted_at),
+                     Comment.user.login,
+                     Comment.state,
+                     LineEnding,
+                     ''.join(WrappedBody)
+                     )
+    else:
+        String = 'On %s @%s wrote:%s%s' % (
+                     str(Comment.created_at),
+                     Comment.user.login,
+                     LineEnding,
+                     ''.join(WrappedBody)
+                     )
     if String[-1] not in ['\n','\r']:
         String = String + LineEnding
     return '-' * 20 + LineEnding + QuoteText (String, Prefix, Depth)
@@ -518,7 +527,7 @@ def FormatPatchSummary (
     # Otherwise, this is a Patch #0 email that includes the file change summary.
     #
     if CommentId or Review:
-        if event in ['pull_request_review_comment', 'pull_request_review']:
+        if event in ['pull_request_review_comment', 'pull_request_review'] and ReviewComments:
             if Review:
                 #
                 # Add description of review to email
@@ -628,8 +637,24 @@ def FormatPatchSummary (
             # then discard the file change summary and append the review comments
             # quoting the decription of the pull request and all previous comments.
             #
+            IssueComments = []
+            for Comment in HubPullRequest.get_issue_comments():
+                IssueComments.append(Comment)
+            Reviews = HubPullRequest.get_reviews()
+            Comments = HubPullRequest.get_review_comments()
+            for Review in Reviews:
+                Match = False
+                for Comment in Comments:
+                    if 'pull_request_review_id' in Comment.raw_data:
+                        if Comment.raw_data['pull_request_review_id'] == Review.id:
+                            Match = True
+                            break
+                if not Match:
+                    Review.created_at = Review.submitted_at
+                    IssueComments.append(Review)
+
             Body = QuoteCommentList (
-                       HubPullRequest.get_issue_comments(),
+                       IssueComments,
                        Before     = Body[0],
                        LineEnding = LineEnding,
                        Prefix     = Prefix
