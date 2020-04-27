@@ -123,6 +123,44 @@ def UpdatePullRequestReviewers (Hub, HubRepo, HubPullRequest, PullRequestGitHubI
         #
         HubPullRequest.create_review_request (AddReviewerList)
 
+def GetReviewComments(Comment, ReviewComments, CommentIdDict):
+    if Comment in ReviewComments:
+        return
+    ReviewComments.append(Comment)
+    #
+    # Add peer comments
+    #
+    if Comment.pull_request_review_id:
+        for PeerComment in CommentIdDict.values():
+            if PeerComment.pull_request_review_id == Comment.pull_request_review_id:
+                GetReviewComments (PeerComment, ReviewComments, CommentIdDict)
+    #
+    # Add child comments
+    #
+    for ChildComment in CommentIdDict.values():
+        if ChildComment.in_reply_to_id == Comment.id:
+            GetReviewComments (ChildComment, ReviewComments, CommentIdDict)
+    #
+    # Add parent comment
+    #
+    if Comment.in_reply_to_id and Comment.in_reply_to_id in CommentIdDict:
+        ParentComment = CommentIdDict[Comment.in_reply_to_id]
+        GetReviewComments (ParentComment, ReviewComments, CommentIdDict)
+
+def GetReviewCommentsFromReview(Review, CommentId, CommentInReplyToId, CommentIdDict):
+    ReviewComments = []
+    for Comment in CommentIdDict.values():
+        if Review:
+            if Comment.pull_request_review_id == Review.id:
+                GetReviewComments (Comment, ReviewComments, CommentIdDict)
+        if CommentId:
+            if Comment.in_reply_to_id == CommentId:
+                GetReviewComments (Comment, ReviewComments, CommentIdDict)
+        if CommentInReplyToId:
+            if Comment.id == CommentInReplyToId:
+                GetReviewComments (Comment, ReviewComments, CommentIdDict)
+    return ReviewComments
+
 application = Flask(__name__)
 
 @application.route(GITHUB_WEBHOOK_ROUTE, methods=['GET', 'POST'])
@@ -483,34 +521,40 @@ def index():
         return dumps({'msg': 'commit_comment created or edited'})
 
     ############################################################################
-    # Process pull_request_review_comment events
+    # Process pull_request_review_comment and pull_request_review events
     # Quote Patch #0 commit message and patch diff of file comment is against
     ############################################################################
-    if event == 'pull_request_review_comment':
+    if event in ['pull_request_review_comment', 'pull_request_review']:
         action = payload['action']
-        if action not in ['created', 'edited']:
-            print ('skip pull_request_review_comment event with action other than created or edited')
-            return dumps({'status': 'skipped'})
-
-        #
-        # Skip REVIEW_REQUEST comments made by the webhook itself.  This same
-        # information is always present in the patch emails, so filtering these
-        # comments prevent double emails when a pull request is opened or
-        # synchronized.
-        #
-        Body = payload['comment']['body'].splitlines()
-        for Line in payload['comment']['body'].splitlines():
-            if Line.startswith (REVIEW_REQUEST):
-                print ('skip pull_request_review_comment event with review request body from this webhook')
+        Review = None
+        ReviewComments = []
+        DeleteId = None
+        ParentReviewId = None
+        UpdateDeltaTime = 0
+        if event in ['pull_request_review_comment']:
+            if action not in ['edited', 'deleted']:
+                print ('skip pull_request_review_comment event with action other than edited or deleted')
                 return dumps({'status': 'skipped'})
 
-        CommitId           = payload['comment']['commit_id']
-        CommentId          = payload['comment']['id']
-        CommentPosition    = payload['comment']['position']
-        CommentPath        = payload['comment']['path']
-        CommentInReplyToId = None
-        if 'in_reply_to_id' in payload['comment']:
-            CommentInReplyToId = payload['comment']['in_reply_to_id']
+            #
+            # Skip REVIEW_REQUEST comments made by the webhook itself.  This same
+            # information is always present in the patch emails, so filtering these
+            # comments prevent double emails when a pull request is opened or
+            # synchronized.
+            #
+            Body = payload['comment']['body'].splitlines()
+            for Line in payload['comment']['body'].splitlines():
+                if Line.startswith (REVIEW_REQUEST):
+                    print ('skip pull_request_review_comment event with review request body from this webhook')
+                    return dumps({'status': 'skipped'})
+
+        if event in ['pull_request_review']:
+            if action not in ['submitted', 'edited']:
+                print ('skip pull_request_review event with action other than submitted or edited')
+                return dumps({'status': 'skipped'})
+            if action == 'edited' and payload['changes'] == {}:
+                print ('skip pull_request_review event edited action that has no changes')
+                return dumps({'status': 'skipped'})
 
         EmailContents   = []
 
@@ -544,6 +588,68 @@ def index():
         if HubPullRequest.base.ref != HubRepo.default_branch:
             print ('Skip pull_request_review_comment event against non-default base branch', HubPullRequest.base.ref)
             return dumps({'status': 'skipped'})
+
+        #
+        # Build dictionary of review comments
+        #
+        CommentIdDict = {}
+        for Comment in HubPullRequest.get_review_comments():
+            Comment.pull_request_review_id = None
+            if 'pull_request_review_id' in Comment.raw_data:
+                Comment.pull_request_review_id = Comment.raw_data['pull_request_review_id']
+            CommentIdDict[Comment.id] = Comment
+
+        #
+        # Determine if review has a parent review, is being deleted, or has
+        # an update time.
+        #
+        if event in ['pull_request_review']:
+            CommitId           = payload['review']['commit_id']
+            CommentUser        = payload['review']['user']['login'],
+            CommentId          = None
+            CommentPosition    = None
+            CommentPath        = None
+            CommentInReplyToId = None
+            ReviewId           = payload['review']['id']
+            try:
+                Review = HubPullRequest.get_review(ReviewId)
+            except:
+                Review = None
+            ReviewComments = GetReviewCommentsFromReview(Review, CommentId, CommentInReplyToId, CommentIdDict)
+            if payload['action'] == 'submitted':
+                UpdateDeltaTime = 0
+                for ReviewComment in ReviewComments:
+                    if ReviewComment.pull_request_review_id == ReviewId:
+                        if ReviewComment.in_reply_to_id and ReviewComment.in_reply_to_id in CommentIdDict:
+                            ParentReviewId = CommentIdDict[ReviewComment.in_reply_to_id].pull_request_review_id
+                            if ParentReviewId and ParentReviewId != ReviewId:
+                                break
+            if payload['action'] == 'edited' and Review:
+                UpdatedAt = datetime.datetime.strptime(payload['pull_request']['updated_at'], "%Y-%m-%dT%H:%M:%SZ")
+                UpdateDeltaTime = (UpdatedAt - Review.submitted_at).seconds
+        if event in ['pull_request_review_comment']:
+            CommitId           = payload['comment']['commit_id']
+            CommentId          = payload['comment']['id']
+            CommentUser        = payload['comment']['user']['login'],
+            CommentPosition    = payload['comment']['position']
+            CommentPath        = payload['comment']['path']
+            CommentInReplyToId = None
+            ReviewId           = None
+            if 'in_reply_to_id' in payload['comment']:
+                CommentInReplyToId = payload['comment']['in_reply_to_id']
+            if 'pull_request_review_id' in payload['comment']:
+                ReviewId = payload['comment']['pull_request_review_id']
+                try:
+                    Review = HubPullRequest.get_review(ReviewId)
+                except:
+                    Review = None
+            ReviewComments = GetReviewCommentsFromReview(Review, CommentId, CommentInReplyToId, CommentIdDict)
+            if payload['action'] == 'deleted':
+                UpdateDeltaTime = 0
+                DeleteId = payload['comment']['id']
+            if payload['action'] == 'edited' and Review:
+                UpdatedAt = datetime.datetime.strptime(payload['comment']['updated_at'], "%Y-%m-%dT%H:%M:%SZ")
+                UpdateDeltaTime = (UpdatedAt - Review.submitted_at).seconds
 
         #
         # Fetch the git commits for the pull request and return a git repo
@@ -588,11 +694,6 @@ def index():
         #
         # Generate the summary email patch #0 with body of email prefixed with >.
         #
-        UpdateDeltaTime = 0
-        if action =='edited':
-            UpdatedAt = datetime.datetime.strptime(payload['comment']['updated_at'], "%Y-%m-%dT%H:%M:%SZ")
-            CreatedAt = datetime.datetime.strptime(payload['comment']['created_at'], "%Y-%m-%dT%H:%M:%SZ")
-            UpdateDeltaTime = (UpdatedAt - CreatedAt).seconds
         Email = FormatPatchSummary (
                   event,
                   GitRepo,
@@ -601,13 +702,17 @@ def index():
                   AddressList,
                   PatchSeriesVersion,
                   CommitRange = HubPullRequest.base.sha + '..' + CommitId,
-                  CommentUser = payload['comment']['user']['login'],
+                  CommentUser = CommentUser,
                   CommentId = CommentId,
                   CommentPosition = CommentPosition,
                   CommentPath = CommentPath,
                   Prefix = '> ',
                   CommentInReplyToId = CommentInReplyToId,
-                  UpdateDeltaTime = UpdateDeltaTime
+                  UpdateDeltaTime = UpdateDeltaTime,
+                  Review = Review,
+                  ReviewComments = ReviewComments,
+                  DeleteId = DeleteId,
+                  ParentReviewId = ParentReviewId
                   )
 
         EmailContents.append (Email)
@@ -618,7 +723,7 @@ def index():
         SendEmails (HubPullRequest, EmailContents, args.EmailServer)
 
         print ('----> Process Event Done <----', event, payload['action'])
-        return dumps({'msg': 'pull_request_review_comment created or edited'})
+        return dumps({'msg': event + ' created or edited or deleted'})
 
     ############################################################################
     # Process pull request events
