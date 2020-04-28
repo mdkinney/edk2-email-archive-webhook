@@ -278,6 +278,7 @@ def FormatPatch (
     Email = GitRepo.git.format_patch (
               '--stdout',
               '--cover-letter',
+              '--no-numbered',
               '--to=' + ToAddress,
               '--from=' + FromAddress,
               '--add-header=' + HeaderInReplyToId,
