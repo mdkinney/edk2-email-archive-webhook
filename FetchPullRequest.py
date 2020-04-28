@@ -249,7 +249,8 @@ def FormatPatch (
         CommentPosition = None,
         CommentPath = None,
         Prefix = '',
-        CommentInReplyToId = None
+        CommentInReplyToId = None,
+        LargePatchLines = 500
         ):
     #
     # Default range is a single commit
@@ -358,9 +359,11 @@ def FormatPatch (
             #
             Start   = '\ndiff --git a/' + CommentPath + ' b/' + CommentPath + '\n'
             End     = '\ndiff --git a/'
+            PatchLines = len(Body[1].splitlines())
             try:
-                Body[1] = Start + Body[1].split(Start,1)[1].split(End,1)[0]
-                Body[1] = Body[1].lstrip()
+                BeforeBody = Body[1].split(Start,1)[0] + '\n'
+                AfterBody  = Body[1].split(Start,1)[1].split(End,1)[1]
+                Body[1] = Start.lstrip() + Body[1].split(Start,1)[1].split(End,1)[0]
             except:
                 Body[1] = Body[1] + 'ERROR: %s Comment to file %s position %d not found.\n' % (Commit.sha, CommentPath, CommentPosition)
 
@@ -377,13 +380,22 @@ def FormatPatch (
             # Insert comments into patch at CommentPosition + 1 lines after '@@ '
             #
             LineNumber = LineNumber + CommentPosition + 1
-            Body = QuoteCommentList (
-                       Comments,
-                       Before     = Body[0] + ''.join(Body[1][:LineNumber]),
-                       After      = ''.join(Body[1][LineNumber:]),
-                       LineEnding = LineEnding,
-                       Prefix     = Prefix
-                       )
+            if PatchLines > LargePatchLines:
+                Body = QuoteCommentList (
+                           Comments,
+                           Before     = Body[0] + BeforeBody + ''.join(Body[1][:LineNumber]),
+                           After      = ''.join(Body[1][LineNumber:]) + AfterBody,
+                           LineEnding = LineEnding,
+                           Prefix     = Prefix
+                           )
+            else:
+                Body = QuoteCommentList (
+                           Comments,
+                           Before     = Body[0] + ''.join(Body[1][:LineNumber]),
+                           After      = ''.join(Body[1][LineNumber:]),
+                           LineEnding = LineEnding,
+                           Prefix     = Prefix
+                           )
     else:
         Body = Body[0] + Body[1]
 
@@ -411,7 +423,8 @@ def FormatPatchSummary (
         Review = None,
         ReviewComments = [],
         DeleteId = None,
-        ParentReviewId = None
+        ParentReviewId = None,
+        LargePatchLines = 500
         ):
 
     #
@@ -562,18 +575,6 @@ def FormatPatchSummary (
                 Body[0] = Body[0] + '-' * 20 + LineEnding
 
             #
-            # If this is a pull request review comment then discard the file
-            # change summary and insert the review comments at the specified
-            # position in the pull request diff quoting the decription of the
-            # pull request, the diff, and all previous comments.
-            #
-
-            #
-            # Generate file diff for the commit range
-            #
-            Diff = '\n-- \n' + GitRepo.git.diff (CommitRange)
-
-            #
             # Get the pull request review comments only keeping the comments
             # that match the CommentPath and CommentPosition from this event
             #
@@ -585,51 +586,86 @@ def FormatPatchSummary (
                     CommentDict[Comment.path][Comment.position] = []
                 CommentDict[Comment.path][Comment.position].append(Comment)
 
-            DiffBody = ''
-            for CommentPath in CommentDict.keys():
-                #
-                # Find the portion of the patch diffs that contain changes to the
-                # file specified by CommentPath
-                #
-                Start   = '\ndiff --git a/' + CommentPath + ' b/' + CommentPath + '\n'
-                End     = '\ndiff --git a/'
-                try:
-                    PathDiff = Start + Diff.split(Start,1)[1].split(End,1)[0]
-                    PathDiff = PathDiff.lstrip()
-                except:
-                    PathDiff = Diff + 'ERROR: Pull request %d review comment to file %s position %d not found.\n' % (HubPullRequest.number, CommentPath, CommentPosition)
+            #
+            # If this is a pull request review comment then discard the file
+            # change summary and insert the review comments at the specified
+            # position in the pull request diff quoting the decription of the
+            # pull request, the diff, and all previous comments.
+            #
 
-                #
-                # Find the first line of the patch diff for file CommentPath that
-                # starts with '@@ '.
-                #
-                PathDiff = PathDiff.splitlines(keepends=True)
-                for StartLineNumber in range(0, len(PathDiff)):
-                    if PathDiff[StartLineNumber].startswith('@@ '):
-                        break
-                #
-                # Quote the diff for the current path
-                #
-                PathDiff = QuoteText (''.join(PathDiff), '> ', 1)
-                PathDiff = PathDiff.splitlines(keepends=True)
+            #
+            # Generate a quoted file diff for the commit range
+            #
+            Diff = '\n-- \n' + GitRepo.git.diff (CommitRange)
+            Diff = QuoteText (''.join(Diff), '> ', 1)
+            Diff = Diff.splitlines(keepends=True)
 
-                Positions = list(CommentDict[CommentPath].keys())
-                Positions.sort()
-                PreviousLineNumber = 0
-                for CommentPosition in Positions:
-                    #
-                    # Insert comments into patch at CommentPosition + 1 lines after '@@ '
-                    #
-                    LineNumber = StartLineNumber + CommentPosition + 1
+            #
+            # If diff is > LargePatchLines, then only keep diff lines associated
+            # with the files mentioned in the comments
+            #
+            if len(Diff) > LargePatchLines:
+                NewDiff = []
+                for CommentPath in CommentDict:
+                    Start  = '> diff --git a/' + CommentPath + ' b/' + CommentPath + '\n'
+                    End    = '> diff --git a/'
+                    Match = False
+                    for Line in Diff:
+                        if Match and Line.startswith (End):
+                            Match = False
+                        if Line.startswith (Start):
+                            Match = True
+                        if Match:
+                            NewDiff.append(Line)
+                Diff = NewDiff
+
+            #
+            # Build dictionary of conversations at line nunbers in Diff
+            #
+            Conversations = {}
+            for CommentPath in CommentDict:
+                #
+                # Find the line in Diff that contains the diffs against file
+                # specified by CommentPath
+                #
+                Start   = '> diff --git a/' + CommentPath + ' b/' + CommentPath + '\n'
+                FileFound = False
+                DiffFound = False
+                for StartLineNumber in range (0, len(Diff)):
+                    if Diff[StartLineNumber].startswith(Start):
+                        FileFound = True
+                    if FileFound:
+                        if Diff[StartLineNumber].startswith('> @@ '):
+                            DiffFound = True
+                            break
+                if not DiffFound:
+                    Diff.append('ERROR: Pull request %d review comment to file %s not found.\n' % (HubPullRequest.number, CommentPath))
+                    continue
+
+                for CommentPosition in CommentDict[CommentPath]:
                     CommentBody = QuoteCommentList (
                                       CommentDict[CommentPath][CommentPosition],
                                       LineEnding = LineEnding,
                                       Prefix     = ''
                                       )
-                    DiffBody = DiffBody + ''.join(PathDiff[PreviousLineNumber:LineNumber]) + CommentBody
-                    PreviousLineNumber = LineNumber
-                DiffBody = DiffBody + ''.join(PathDiff[LineNumber:])
+                    Conversations[StartLineNumber + CommentPosition + 1] = CommentBody
 
+            #
+            # Insert conversations into the diff patch
+            #
+            DiffBody = ''
+            PreviousLineNumber = 0
+            LineNumbers = list(Conversations.keys())
+            LineNumbers.sort()
+            LineNumber = 0
+            for LineNumber in LineNumbers:
+                DiffBody = DiffBody + ''.join(Diff[PreviousLineNumber:LineNumber]) + Conversations[LineNumber]
+                PreviousLineNumber = LineNumber
+            DiffBody = DiffBody + ''.join(Diff[LineNumber:])
+
+            #
+            # Append diff patch with coversations to the email body
+            #
             Body = Body[0] + '\n-- \n' + DiffBody
         else:
             #

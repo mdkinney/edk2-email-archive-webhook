@@ -682,8 +682,6 @@ def index():
         CommitFiles = {}
         for Commit in HubPullRequest.get_commits():
             CommitFiles.update (GitRepo.commit(Commit.sha).stats.files)
-            if Commit.sha == CommitId:
-                break
 
         #
         # Get maintainers and reviewers for all files in this commit
@@ -701,7 +699,7 @@ def index():
                   HubPullRequest,
                   AddressList,
                   PatchSeriesVersion,
-                  CommitRange = HubPullRequest.base.sha + '..' + CommitId,
+                  CommitRange = HubPullRequest.base.sha + '..' + HubPullRequest.head.sha,
                   CommentUser = CommentUser,
                   CommentId = CommentId,
                   CommentPosition = CommentPosition,
