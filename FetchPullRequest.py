@@ -209,6 +209,12 @@ def CommentAsEmailText(Comment, LineEnding, Prefix, Depth):
                      )
     if String[-1] not in ['\n','\r']:
         String = String + LineEnding
+    for Reaction in Comment.get_reactions():
+        String = String + '@%s reacted with %s%s' % (
+                            Reaction.user.login,
+                            Reaction.content,
+                            LineEnding
+                            )
     return '-' * 20 + LineEnding + QuoteText (String, Prefix, Depth)
 
 def QuoteCommentList (Comments, Before = '', After = '', LineEnding = '\n', Prefix = '> '):
