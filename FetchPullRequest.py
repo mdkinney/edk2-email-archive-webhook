@@ -283,7 +283,6 @@ def FormatPatch (
         HeaderMessageId   = 'Message-ID: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, PatchNumber)
     Email = GitRepo.git.format_patch (
               '--stdout',
-              '--cover-letter',
               '--no-numbered',
               '--to=' + ToAddress,
               '--from=' + FromAddress,
