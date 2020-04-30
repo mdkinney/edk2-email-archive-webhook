@@ -368,8 +368,12 @@ def FormatPatch (
             PatchLines = len(Body[1].splitlines())
             try:
                 BeforeBody = Body[1].split(Start,1)[0] + '\n'
-                AfterBody  = Body[1].split(Start,1)[1].split(End,1)[1]
-                Body[1] = Start.lstrip() + Body[1].split(Start,1)[1].split(End,1)[0]
+                try:
+                    AfterBody = Body[1].split(Start,1)[1].split(End,1)[1]
+                    Body[1] = Start.lstrip() + Body[1].split(Start,1)[1].split(End,1)[0]
+                except:
+                    AfterBody = ''
+                    Body[1] = Start.lstrip() + Body[1].split(Start,1)[1]
             except:
                 Body[1] = Body[1] + 'ERROR: %s Comment to file %s position %d not found.\n' % (Commit.sha, CommentPath, CommentPosition)
 
