@@ -434,6 +434,7 @@ def FormatPatchSummary (
         CommentInReplyToId = None,
         UpdateDeltaTime = 0,
         Review = None,
+        ReviewId = None,
         ReviewComments = [],
         DeleteId = None,
         ParentReviewId = None,
@@ -453,18 +454,18 @@ def FormatPatchSummary (
     #   <webhook-<repo name>-pr<pull>-v<patch series version>-p<patch number>@tianocore.org>
     #
     ToAddress = '<%s>' % (EMAIL_ARCHIVE_ADDRESS)
-    if Review:
+    if ReviewId:
         FromAddress = '%s via TianoCore Webhook <webhook@tianocore.org>' % (CommentUser)
         if DeleteId:
-            HeaderMessageId   = 'Message-ID: <webhook-%s-pull%d-v%d-p%d-r%d-d%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0, Review.id, DeleteId)
+            HeaderMessageId   = 'Message-ID: <webhook-%s-pull%d-v%d-p%d-r%d-d%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0, ReviewId, DeleteId)
         elif UpdateDeltaTime != 0:
-            HeaderMessageId   = 'Message-ID: <webhook-%s-pull%d-v%d-p%d-r%d-t%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0, Review.id, UpdateDeltaTime)
+            HeaderMessageId   = 'Message-ID: <webhook-%s-pull%d-v%d-p%d-r%d-t%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0, ReviewId, UpdateDeltaTime)
         else:
-            HeaderMessageId   = 'Message-ID: <webhook-%s-pull%d-v%d-p%d-r%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0, Review.id)
+            HeaderMessageId   = 'Message-ID: <webhook-%s-pull%d-v%d-p%d-r%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0, ReviewId)
         if ParentReviewId:
             HeaderInReplyToId = 'In-Reply-To: <webhook-%s-pull%d-v%d-p%d-r%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0, ParentReviewId)
         elif DeleteId or UpdateDeltaTime != 0:
-            HeaderInReplyToId = 'In-Reply-To: <webhook-%s-pull%d-v%d-p%d-r%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0, Review.id)
+            HeaderInReplyToId = 'In-Reply-To: <webhook-%s-pull%d-v%d-p%d-r%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0, ReviewId)
         else:
             HeaderInReplyToId = 'In-Reply-To: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0)
     elif CommentId:
@@ -579,7 +580,9 @@ def FormatPatchSummary (
             else:
                 Body[0] = QuoteText(Body[0], '> ', 1)
                 Body[0] = Body[0] + '-' * 20 + LineEnding
-                if CommentId:
+                if ReviewId and DeleteId:
+                    Body[0] = Body[0] + 'Review associated with CommentId %s was deleted' % (CommentId) + LineEnding
+                elif CommentId:
                     Body[0] = Body[0] + 'Review associated with CommentId %s not found' % (CommentId) + LineEnding
                 elif Review:
                     Body[0] = Body[0] + 'Review associated with ReviewId %s not found' % (Review.id) + LineEnding

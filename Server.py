@@ -708,6 +708,7 @@ def index():
                   CommentInReplyToId = CommentInReplyToId,
                   UpdateDeltaTime = UpdateDeltaTime,
                   Review = Review,
+                  ReviewId = ReviewId,
                   ReviewComments = ReviewComments,
                   DeleteId = DeleteId,
                   ParentReviewId = ParentReviewId
