@@ -815,7 +815,6 @@ def index():
         EmailContents = []
         PatchNumber = 0
         for Commit in HubPullRequest.get_commits():
-
             PatchNumber = PatchNumber + 1
 
             #
@@ -832,36 +831,39 @@ def index():
             PullRequestGitHubIdList = list(set(PullRequestGitHubIdList + GitHubIdList))
             PullRequestEmailList    = list(set(PullRequestEmailList    + EmailList))
 
-            print ('pr[%d]' % (HubPullRequest.number), Commit.sha, ' @' + ' @'.join(PullRequestGitHubIdList))
+            if action in ['opened', 'synchronize', 'reopened']:
 
-            #
-            # Update the list of required reviewers for this commit
-            #
-            ReviewersUpdated = UpdatePullRequestCommitReviewers (Commit, GitHubIdList)
+                print ('pr[%d]' % (HubPullRequest.number), Commit.sha, ' @' + ' @'.join(PullRequestGitHubIdList))
 
-            #
-            # Generate email contents for all commits in a pull request if this is
-            # a new pull request or a forced push was done to an existing pull request.
-            # Generate email contents for patches that add new reviewers.  This
-            # occurs when when new commits are added to an existing pull request.
-            #
-            if NewPatchSeries or ReviewersUpdated:
-                Email = FormatPatch (
-                            event,
-                            GitRepo,
-                            HubRepo,
-                            HubPullRequest,
-                            Commit,
-                            AddressList,
-                            PatchSeriesVersion,
-                            PatchNumber
-                            )
-                EmailContents.append (Email)
+                #
+                # Update the list of required reviewers for this commit
+                #
+                ReviewersUpdated = UpdatePullRequestCommitReviewers (Commit, GitHubIdList)
 
-        #
-        # Update the list of required reviewers for the pull request
-        #
-        UpdatePullRequestReviewers (Hub, HubRepo, HubPullRequest, PullRequestGitHubIdList)
+                #
+                # Generate email contents for all commits in a pull request if this is
+                # a new pull request or a forced push was done to an existing pull request.
+                # Generate email contents for patches that add new reviewers.  This
+                # occurs when when new commits are added to an existing pull request.
+                #
+                if NewPatchSeries or ReviewersUpdated:
+                    Email = FormatPatch (
+                                event,
+                                GitRepo,
+                                HubRepo,
+                                HubPullRequest,
+                                Commit,
+                                AddressList,
+                                PatchSeriesVersion,
+                                PatchNumber
+                                )
+                    EmailContents.append (Email)
+
+        if action in ['opened', 'synchronize', 'reopened']:
+            #
+            # Update the list of required reviewers for the pull request
+            #
+            UpdatePullRequestReviewers (Hub, HubRepo, HubPullRequest, PullRequestGitHubIdList)
 
         #
         # If this is a new pull request or a forced push on a pull request or an
