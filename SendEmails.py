@@ -75,7 +75,6 @@ def SendEmails (HubPullRequest, EmailContents, SendMethod):
                 try:
                     SmtpServer.sendmail(FromAddress, ToList, Email)
                     print ('SMTP send mail success')
-                    time.sleep(1)
                 except:
                     print ('ERROR: SMTP send mail failed')
             SmtpServer.quit()
