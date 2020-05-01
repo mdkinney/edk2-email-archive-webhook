@@ -291,7 +291,7 @@ def FormatPatch (
               '--from=' + FromAddress,
               '--add-header=' + HeaderInReplyToId,
               '--add-header=' + HeaderMessageId,
-              '--subject-prefix=%s][PATCH v%d %*d/%d' % (HubRepo.name, PatchSeriesVersion, len(str(HubPullRequest.commits)), PatchNumber, HubPullRequest.commits),
+              '--subject-prefix=%s][PATCH v%d %0*d/%d' % (HubRepo.name, PatchSeriesVersion, len(str(HubPullRequest.commits)), PatchNumber, HubPullRequest.commits),
               CommitRange
               )
 
