@@ -5,4 +5,5 @@ Repository/
 __pycache__/
 tags/
 .vscode/
+*.db
 
