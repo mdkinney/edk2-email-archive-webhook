@@ -1,0 +1,56 @@
+## @file
+# Flask Configuration Settings
+#
+# Copyright (c) 2021, Intel Corporation. All rights reserved.<BR>
+# SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+
+'''
+TianoCore Code Review Archive Service Configuration Settings
+'''
+
+#
+# Create 32 character secret instructions:
+#   import secrets
+#   print(secrets.token_urlsafe(32))
+#
+SECRET_KEY = ''
+#
+# Database.db file in same directory as this python script
+#
+SQLALCHEMY_DATABASE_URI = 'sqlite:///database.db'
+SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+USER_APP_NAME = ''
+
+USER_ENABLE_EMAIL                    = True
+USER_ENABLE_USERNAME                 = True
+USER_REQUIRE_RETYPE_PASSWORD         = True
+USER_ENABLE_CHANGE_USERNAME          = True
+USER_ENABLE_CHANGE_PASSWORD          = True
+USER_AUTO_LOGIN_AFTER_CONFIRM        = True
+USER_AUTO_LOGIN_AFTER_REGISTER       = True
+USER_AUTO_LOGIN_AFTER_RESET_PASSWORD = True
+USER_AUTO_LOGIN                      = True
+USER_AUTO_LOGIN_AT_LOGIN             = True
+USER_EMAIL_SENDER_NAME               = ''
+USER_EMAIL_SENDER_EMAIL              = 'noreply@noreply.org'
+USER_ENABLE_INVITE_USER              = True
+USER_REQUIRE_INVITATION              = True
+USER_INVITE_EXPIRATION               = 2*24*60*60  # 2 days in seconds
+
+#
+# PROXY settings
+#
+HTTP_PROXY = ''
+
+#
+# Flask Mail Settings to send emails through SMTP email server
+#
+MAIL_SERVER         = ''
+MAIL_PORT           = 587
+MAIL_USERNAME       = ''
+MAIL_PASSWORD       = ''
+MAIL_DEFAULT_SENDER = ''
+MAIL_USE_SSL        = False
+MAIL_USE_TLS        = True

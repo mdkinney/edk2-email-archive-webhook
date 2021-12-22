@@ -4,25 +4,115 @@ Assign reviewers to commits in a GitHub pull request based on assignments
 documented in Maintainers.txt and generates an email archive of all pull request
 and code review activities.
 
-# Webhook Service Command Line Options
+## Installation Instructions
 
-```
-usage: Server [-h] [-e {Off,SMTP,SendGrid}] [-v] [-q] [--debug [0-9]]
+1) Clone GIT repo with TianoCore Code Review Archive Service
 
-Assign reviewers to commits in a GitHub pull request based on assignments
-documented in Maintainers.txt and generate email archive of all review
-activities. Copyright (c) 2020, Intel Corporation. All rights reserved.
+2) Install Python 3.8 or newer
 
-optional arguments:
-  -h, --help            show this help message and exit
-  -e {Off,SMTP,SendGrid}, --email-server {Off,SMTP,SendGrid}
-                        Email server type used to send emails.
-  -v, --verbose         Increase output messages
-  -q, --quiet           Reduce output messages
-  --debug [0-9]         Set debug level
-```
+3) PIP install from requirements.txt
 
-# System Environment Variables
+4) Create 32 character SECRET_KEY for Flask (example creation and format)
+
+    py
+    >>> import secrets
+    >>> print(secrets.token_urlsafe(32))
+    NHf3_djweYDyGwXPGXjQfwCK4L2tcLDPsRhMRbZ1D9Q
+
+    py -c "import secrets; print(secrets.token_urlsafe(32))"
+    NHf3_djweYDyGwXPGXjQfwCK4L2tcLDPsRhMRbZ1D9Q
+
+5) Copy config.py.template to config.py and fill in required settings.
+
+6) Create first administrator account using adduser.py
+
+7) Launch Server by running app.py
+
+8) Login using account created in (6)
+
+10) Invite other administrators
+
+11) Add repo
+   * GitHubToken
+
+     Create PAT in GitHub user dev settings
+
+   * GitHubWebHookSecret (example creation and format)
+
+     py -c "import secrets; print(secrets.token_hex(32))"
+     ee6e0fa4f9e4fc255b1c1200f2444843d88c614393a5fdcd31b329626fe86643
+
+## Development Mode
+
+* If behind a firewall, then use smee.io to redirect to local version of app
+* If using smee.io, then must disable VPN and http proxies
+* If disable VPN, then need to disable HTTP_PROXY in config.py
+* If running with multiple repos, then a smee client is required for each
+  repo redirected to the correct webhook link /webhook/<org>/<repo>
+
+## Production Mode
+
+## Interesting Notes
+
+* GitHub PR commit ranges is not PR sha base to PR sha head.  If PR is out of
+  sync, this can return an very long list of commits.  Instead, commit range
+  of sha values can be determined with get_commits()
+
+## Todo List
+
+* Combination of GitHub org and GitHub repo must be unique.
+
+* Add all requests, responses, git commands, and emails to logs.
+
+* Auto clear log entries older than 30 days.
+
+* Add clear logs button in scope of repo
+
+* Add select repo list with hyperlinks for each repo that when selected takes
+  you to log view page.  Buttons at top for HOME, ADD REPO
+
+  When in log view for one repo, buttons at top for BACK, HOME, UPDATE, DELETE, CLEAR LOG
+
+* Git patches with Unicode or invalid UTF8 characters have to be stripped to
+  process through python email module.  Example workaround:
+
+  Message = email.message_from_bytes(Email.encode('utf8','surrogateescape'))
+
+  Need a better solution that guarantees that patch emails sent with
+  complete patches (no comments) can be extracted and applied and get the
+  same result.
+
+* Should we upgrade from SHA1 to SHA256 for GitHub Request HMAC auth?
+  Read GitHub pages.
+
+* Add TianoCore Favicon logo
+
+## Completed Tasks
+
+* DONE 12-22-2021: Add form to list users, delete users, and invite new users
+
+* DONE 12-22-2021 Replace MyCorp Copyright 2019 with TianoCore Copyright 2021.
+
+* DONE 12-22-2021 - User strong passwords requirements.
+
+  class CustomUserManager(UserManager):
+
+      # Override the default password validator
+      def password_validator(self, form, field):
+          # Regular expression used to validate a strong password.
+          #   * The password length must be greater than or equal to 8
+          #   * The password must contain one or more uppercase characters
+          #   * The password must contain one or more lowercase characters
+          #   * The password must contain one or more numeric values
+          #   * The password must contain one or more special characters
+          #
+          # https://www.computerworld.com/article/2833081/how-to-validate-password-strength-using-a-regular-expression.html
+          #
+          StrongPasswordRegex = '(?=^.{8,}$)(?=.*\d)(?=.*[!@#$%^&*]+)(?![.\n])(?=.*[A-Z])(?=.*[a-z]).*$'
+          if not re.match(StrongPasswordRegex, field.data):
+              raise ValidationError(('Password must be >=8 chars with one or more Upper, Lower, Number, and Special'))
+
+# Configuration Settings (Outdated)
 
 The following environment variables must be set before starting the webhook
 service.
@@ -37,7 +127,7 @@ service.
   [Creating webHooks](https://developer.github.com/webhooks/creating/)
 
 * `GITHUB_WEBHOOK_SECRET` - 64 character hex string that is secret used to
-  validate payloads received from GitHub.  If this envirionment variable is not
+  validate payloads received from GitHub.  If this environment variable is not
   set correctly, then all payloads from GitHub are rejected.  This value
   must match the GitHub repository setting  in Settings->WebHooks->Edit->Secret.
 
@@ -61,11 +151,9 @@ service.
   service that allows a community of developers to receive the emails generated
   by this webhook service and for the emails to be archived.
 
-* `SMTP_ADDRESS` - The address of the SMTP server used to send emails
-  (e.g. `smtp.gmail.com`).
+* `SMTP_ADDRESS` - The address of the SMTP server used to send emails.
 
-* `SMTP_PORT_NUMBER` - The port number of the SMTP server used to send emails
-  (e.g. `587`).
+* `SMTP_PORT_NUMBER` - The port number of the SMTP server used to send emails.
 
 * `SMTP_USER_NAME` - The use name of the account on the SMTP server used to send
   emails.

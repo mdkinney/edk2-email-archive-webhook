@@ -1,0 +1,46 @@
+{% extends 'bootstrap/base.html' %}
+{% import "bootstrap/wtf.html" as wtf %}
+
+{% block title %}
+TianoCore Code Review Archive Service Configure Webhook
+{% endblock %}
+
+
+{% block content %}
+
+<div class="container">
+  <div class="row">
+    <div class="col-md-10 col-lg-8 mx-lg-auto mx-md-auto">
+
+      <h1 class="pt-5 pb-2">TianoCore Code Review Archive Service</h1>
+      <h1 class="pt-5 pb-2">Configure Webhook Settings</h1>
+      {% for webhookconfiguration in webhookconfigurations %}
+      <h3>
+        <form style="width:100px; display:inline-block;" method="get" action="/config/logsrepo/{{ webhookconfiguration.id }}">
+          <input type="submit" value="Logs" name="logs"/>
+        </form>
+        <form style="width:100px; display:inline-block;" method="get" action="/config/updaterepo/{{ webhookconfiguration.id }}">
+          <input type="submit" value="Update" name="update"/>
+        </form>
+        {{ webhookconfiguration.GithubOrgName }}
+        {{ webhookconfiguration.GithubRepoName }}
+        <form style="width:100px; display:inline-block;" method="post" action="/config/deleterepo/{{ webhookconfiguration.id }}">
+          <input type="submit" value="Delete" name="delete"/>
+        </form>
+      </h3>
+      {% endfor %}
+      <h3>
+        <form style="width:100px; display:inline-block;" method="get" action="/config/addrepo">
+          <input type="submit" value="Add" name="add"/>
+        </form>
+        <form style="width:100px; display:inline-block;" method="get" action="/">
+          <input type="submit" value="Home" name="home"/>
+        </form>
+      </h3>
+    <p class="pt-5"><strong>{{ message }}</strong></p>
+
+    </div>
+  </div>
+</div>
+
+{% endblock %}

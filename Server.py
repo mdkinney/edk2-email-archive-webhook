@@ -18,7 +18,7 @@ import argparse
 import hmac
 import datetime
 from json import dumps
-from flask import Flask, request, abort
+from flask import request, abort
 from github import Github
 from GetMaintainers import GetMaintainers
 from GetMaintainers import ParseMaintainerAddresses
@@ -26,19 +26,6 @@ from SendEmails import SendEmails
 from FetchPullRequest import FetchPullRequest
 from FetchPullRequest import FormatPatch
 from FetchPullRequest import FormatPatchSummary
-
-#
-# Globals for help information
-#
-__prog__        = 'TianoCoreGitHubWebHookServer'
-__copyright__   = 'Copyright (c) 2020, Intel Corporation. All rights reserved.'
-__description__ = 'Assign reviewers to commits in a GitHub pull request based on assignments documented in Maintainers.txt and generate email archive of all review activities.\n'
-
-GITHUB_TOKEN               = os.environ['GITHUB_TOKEN']
-GITHUB_WEBHOOK_SECRET      = os.environ['GITHUB_WEBHOOK_SECRET']
-GITHUB_WEBHOOK_ROUTE       = os.environ['GITHUB_WEBHOOK_ROUTE']
-GITHUB_WEBHOOK_PORT_NUMBER = int(os.environ['GITHUB_WEBHOOK_PORT_NUMBER'])
-GITHUB_REPO_WHITE_LIST     = os.environ['GITHUB_REPO_WHITE_LIST']
 
 REVIEW_REQUEST     = '[CodeReview] Review-request @'
 REVIEWED_BY        = '[CodeReview] Reviewed-by'
@@ -161,14 +148,8 @@ def GetReviewCommentsFromReview(Review, CommentId, CommentInReplyToId, CommentId
                 GetReviewComments (Comment, ReviewComments, CommentIdDict)
     return ReviewComments
 
-application = Flask(__name__)
-
-@application.route(GITHUB_WEBHOOK_ROUTE, methods=['GET', 'POST'])
-def index():
-    """
-    Main WSGI application entry.
-    """
-    if args.Verbose:
+def ProcessGithubRequest(GITHUB_TOKEN, GITHUB_WEBHOOK_SECRET, GITHUB_REPO_WHITE_LIST, EmailArchiveAddress, SendEmailEnabled, app, Verbose):
+    if Verbose:
         print (request.headers)
 
     # Only POST is implemented
@@ -191,7 +172,7 @@ def index():
             abort(501, "Only SHA1 is supported")
 
         # HMAC requires the key to be bytes, but data is string
-        mac = hmac.new(bytes(secret, 'utf-8'), msg=request.data, digestmod='sha1')
+        mac = hmac.new(bytes(secret, 'utf-8'), msg=request.get_data(), digestmod='sha1')
 
         # Python does not have hmac.compare_digest prior to 2.7.7
         if sys.hexversion >= 0x020707F0:
@@ -258,6 +239,14 @@ def index():
         print ('skip event for different repo')
         return dumps({'status': 'skipped'})
 
+    #
+    # Retrieve Hub object for this repo
+    #
+    try:
+        Hub = Github (GITHUB_TOKEN)
+    except:
+        print(400, "Invalid GITHUB_TOKEN")
+        abort(400, "Invalid GITHUB_TOKEN")
 
     print ('----> Process Event <----', event, payload['action'])
 
@@ -330,9 +319,11 @@ def index():
 
 
         PullRequestAddressList = []
+        CommitShaList = []
         for Commit in HubPullRequest.get_commits():
+            CommitShaList.append(Commit.sha)
             #
-            # Get list of files modifies by commit from GIT repository
+            # Get list of files modified by commit from GIT repository
             #
             CommitFiles = GitRepo.commit(Commit.sha).stats.files
 
@@ -358,13 +349,14 @@ def index():
         if action == 'deleted':
             UpdateDeltaTime = -1
         Summary = FormatPatchSummary (
+                    EmailArchiveAddress,
                     event,
                     GitRepo,
                     HubRepo,
                     HubPullRequest,
                     PullRequestAddressList,
                     PatchSeriesVersion,
-                    CommitRange = HubPullRequest.base.sha + '..' + HubPullRequest.head.sha,
+                    CommitRange = CommitShaList[0] + '..' + CommitShaList[-1],
                     CommentUser = payload['comment']['user']['login'],
                     CommentId = payload['comment']['id'],
                     CommentPosition = None,
@@ -376,7 +368,7 @@ def index():
         #
         # Send any generated emails
         #
-        SendEmails (HubPullRequest, [Summary], args.EmailServer)
+        SendEmails (HubPullRequest, [Summary], SendEmailEnabled, app)
 
         print ('----> Process Event Done <----', event, payload['action'])
         return dumps({'msg': 'issue_comment created or edited'})
@@ -491,6 +483,7 @@ def index():
             AddressList, GitHubIdList, EmailList = ParseMaintainerAddresses(Addresses)
 
             Email = FormatPatch (
+                        EmailArchiveAddress,
                         event,
                         GitRepo,
                         HubRepo,
@@ -515,7 +508,7 @@ def index():
         #
         # Send any generated emails
         #
-        SendEmails (HubPullRequest, EmailContents, args.EmailServer)
+        SendEmails (HubPullRequest, EmailContents, SendEmailEnabled, app)
 
         print ('----> Process Event Done <----', event, payload['action'])
         return dumps({'msg': 'commit_comment created or edited'})
@@ -680,7 +673,9 @@ def index():
         # base sha up to the commit id of the pull request review comment.
         #
         CommitFiles = {}
+        CommitShaList = []
         for Commit in HubPullRequest.get_commits():
+            CommitShaList.append (Commit.sha)
             CommitFiles.update (GitRepo.commit(Commit.sha).stats.files)
 
         #
@@ -693,13 +688,14 @@ def index():
         # Generate the summary email patch #0 with body of email prefixed with >.
         #
         Email = FormatPatchSummary (
+                  EmailArchiveAddress,
                   event,
                   GitRepo,
                   HubRepo,
                   HubPullRequest,
                   AddressList,
                   PatchSeriesVersion,
-                  CommitRange = HubPullRequest.base.sha + '..' + HubPullRequest.head.sha,
+                  CommitRange = CommitShaList[0] + '..' + CommitShaList[-1],
                   CommentUser = CommentUser,
                   CommentId = CommentId,
                   CommentPosition = CommentPosition,
@@ -719,7 +715,7 @@ def index():
         #
         # Send any generated emails
         #
-        SendEmails (HubPullRequest, EmailContents, args.EmailServer)
+        SendEmails (HubPullRequest, EmailContents, SendEmailEnabled, app)
 
         print ('----> Process Event Done <----', event, payload['action'])
         return dumps({'msg': event + ' created or edited or deleted'})
@@ -848,6 +844,7 @@ def index():
                 #
                 if NewPatchSeries or ReviewersUpdated:
                     Email = FormatPatch (
+                                EmailArchiveAddress,
                                 event,
                                 GitRepo,
                                 HubRepo,
@@ -876,6 +873,7 @@ def index():
             if action in ['edited', 'closed']:
                 UpdateDeltaTime = (HubPullRequest.updated_at - HubPullRequest.created_at).seconds
             Summary = FormatPatchSummary (
+                          EmailArchiveAddress,
                           event,
                           GitRepo,
                           HubRepo,
@@ -888,46 +886,10 @@ def index():
         #
         # Send any generated emails
         #
-        SendEmails (HubPullRequest, EmailContents, args.EmailServer)
+        SendEmails (HubPullRequest, EmailContents, SendEmailEnabled, app)
 
         print ('----> Process Event Done <----', event, payload['action'])
         return dumps({'msg': 'pull_request opened or synchronize'})
 
     print ('skip unsupported event')
     return dumps({'status': 'skipped'})
-
-if __name__ == '__main__':
-    #
-    # Create command line argument parser object
-    #
-    parser = argparse.ArgumentParser (prog = __prog__,
-                                      description = __description__ + __copyright__,
-                                      conflict_handler = 'resolve')
-    parser.add_argument ("-e", "--email-server", dest = 'EmailServer', choices = ['Off', 'SMTP', 'SendGrid'], default = 'Off',
-                         help = "Email server type used to send emails.")
-    parser.add_argument ("-v", "--verbose", dest = 'Verbose', action = "store_true",
-                         help = "Increase output messages")
-    parser.add_argument ("-q", "--quiet", dest = 'Quiet', action = "store_true",
-                         help = "Reduce output messages")
-    parser.add_argument ("--debug", dest = 'Debug', type = int, metavar = '[0-9]', choices = range (0, 10), default = 0,
-                         help = "Set debug level")
-
-    #
-    # Parse command line arguments
-    #
-    args = parser.parse_args ()
-
-    #
-    # Create GitHub object authenticated using GitHub Token for the webhook
-    #
-    try:
-        Hub = Github (GITHUB_TOKEN)
-    except:
-        print ('can not access GitHub APIs')
-        sys.exit(1)
-
-    try:
-        application.run(debug=False, host='localhost', port=GITHUB_WEBHOOK_PORT_NUMBER, threaded=False)
-    except:
-        print ('can not create listener for GitHub HTTP requests')
-        sys.exit(1)

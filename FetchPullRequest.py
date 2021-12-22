@@ -17,8 +17,6 @@ import email
 import textwrap
 import datetime
 
-EMAIL_ARCHIVE_ADDRESS = os.environ['EMAIL_ARCHIVE_ADDRESS']
-
 class Progress(git.remote.RemoteProgress):
     def __init__(self):
         git.remote.RemoteProgress.__init__(self)
@@ -244,6 +242,7 @@ def QuoteCommentList (Comments, Before = '', After = '', LineEnding = '\n', Pref
     return Body
 
 def FormatPatch (
+        EmailArchiveAddress,
         event,
         GitRepo,
         HubRepo,
@@ -272,7 +271,7 @@ def FormatPatch (
     # Format the Messsage-ID:
     #   <webhook-<repo name>-pr<pull>-v<patch series version>-p<patch number>@tianocore.org>
     #
-    ToAddress = '<%s>' % (EMAIL_ARCHIVE_ADDRESS)
+    ToAddress = '<%s>' % (EmailArchiveAddress)
     if CommentId:
         FromAddress = '%s via TianoCore Webhook <webhook@tianocore.org>' % (CommentUser)
         HeaderMessageId   = 'Message-ID: <webhook-%s-pull%d-v%d-p%d-c%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, PatchNumber, CommentId)
@@ -308,7 +307,7 @@ def FormatPatch (
     # body at the '\n---\n' marker which seperates the commit message from the
     # patch diffs.
     #
-    Message = email.message_from_string(Email)
+    Message = email.message_from_bytes(Email.encode('utf8','surrogateescape'))
     Pattern = '\n---\n'
     Body = Message.get_payload().split (Pattern, 1)
     Body[0] = Body[0] + Pattern
@@ -419,6 +418,7 @@ def FormatPatch (
     return Message.as_string()
 
 def FormatPatchSummary (
+        EmailArchiveAddress,
         event,
         GitRepo,
         HubRepo,
@@ -445,7 +445,8 @@ def FormatPatchSummary (
     # Default range is the entire pull request
     #
     if CommitRange is None:
-        CommitRange = HubPullRequest.base.sha + '..' + HubPullRequest.head.sha
+        CommitShaList = [Commit.sha for Commit in HubPullRequest.get_commits()]
+        CommitRange = CommitShaList[0] + '..' + CommitShaList[-1]
 
     #
     # Format the Subject:
@@ -453,7 +454,7 @@ def FormatPatchSummary (
     # Format the Messsage-ID:
     #   <webhook-<repo name>-pr<pull>-v<patch series version>-p<patch number>@tianocore.org>
     #
-    ToAddress = '<%s>' % (EMAIL_ARCHIVE_ADDRESS)
+    ToAddress = '<%s>' % (EmailArchiveAddress)
     if ReviewId:
         FromAddress = '%s via TianoCore Webhook <webhook@tianocore.org>' % (CommentUser)
         if DeleteId:
@@ -524,9 +525,10 @@ def FormatPatchSummary (
     # pull request can inserted and leave the option to discard the file change
     # summary.
     #
-    Message = email.message_from_string(Email)
     Pattern = '\n-- \n'
-    Body = Message.get_payload().split (Pattern, 1)[0] + Pattern
+    Email = Email.split (Pattern, 1)[0] + Pattern
+    Message = email.message_from_bytes(Email.encode('utf8','surrogateescape'))
+    Body = Message.get_payload()
     Body = Body.split ('*** BLURB HERE ***', 1)
 
     #

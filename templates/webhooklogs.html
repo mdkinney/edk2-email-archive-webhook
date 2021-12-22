@@ -1,0 +1,45 @@
+{% extends 'bootstrap/base.html' %}
+{% import "bootstrap/wtf.html" as wtf %}
+
+{% block title %}
+TianoCore Code Review Archive Service Configure Webhook
+{% endblock %}
+
+
+{% block content %}
+
+<div class="container">
+  <div class="row">
+    <div class="col-md-10 col-lg-8 mx-lg-auto mx-md-auto">
+
+      <h1 class="pt-5 pb-2">TianoCore Code Review Archive Service</h1>
+      <h1 class="pt-5 pb-2">Webhook Logs {{ webhookconfiguration.GithubOrgName }}/{{ webhookconfiguration.GithubRepoName}} </h1>
+      <h3>
+        <form style="width:100px; display:inline-block;" method="get" action="/config/listrepos">
+          <input type="submit" value="Back" name="back"/>
+        </form>
+        <form style="width:100px; display:inline-block;" method="get" action="/">
+          <input type="submit" value="Home" name="home"/>
+        </form>
+      </h3>
+      <div class="column" style="width: 50%; float:left">
+        <h3 style="text-align:center;">Log Entries</h3>
+        <ul style="list-style: none;">
+          {% for log in logs %}
+            <li style="font-family:courier;">
+              <a href="/config/logsrepo/{{ webhookconfiguration.id }}/{{log.id}}">{{ log.TimeStamp }}  {{ log.Type.name }}</a>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+      <div class="column" style="width: 50%; float:right">
+        <h3 style="text-align:center;">Log Details</h3>
+        <textarea wrap="off" cols="80" rows="{{rows}}" style="border: 1px solid grey; width:200%;">{{ text }}</textarea>
+      </div>
+      <p class="pt-5"><strong>{{ message }}</strong></p>
+
+    </div>
+  </div>
+</div>
+
+{% endblock %}
