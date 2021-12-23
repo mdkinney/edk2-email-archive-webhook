@@ -6,7 +6,7 @@
 #
 ##
 '''
-app
+TianoCore Code Review Archive Service Flask Application
 '''
 import os
 import enum
@@ -17,7 +17,7 @@ import smtplib
 from flask_bootstrap import Bootstrap
 from flask import Flask, render_template, request, redirect, abort
 from flask_sqlalchemy import SQLAlchemy
-from flask_user import UserManager, UserMixin, login_required
+from flask_user import UserManager, UserMixin, login_required, current_user
 from flask_wtf import FlaskForm
 from wtforms import StringField, SelectField, IntegerField, BooleanField, SubmitField, PasswordField, ValidationError
 from wtforms.validators import DataRequired
@@ -120,8 +120,6 @@ class WebhookLog(db.Model):
     Type = db.Column(db.Enum(LogTypeEnum))
     Text = db.Column(db.Text())
 
-# route: localhost:5000/webhook/<string:org>/<string:repo>
-
 class WebhookConfigurationForm(FlaskForm):
     GithubOrgName       = StringField('GithubOrgName')
     GithubToken         = StringField('GithubToken')
@@ -155,6 +153,23 @@ def create_app():
     @app.route('/')
     def home_page():
         return render_template('index.html')
+
+    @app.route('/config/listusers', methods=['GET', 'POST'])
+    @login_required
+    def webhook_users():
+        users = User.query.all()
+        return render_template('webhooklistusers.html', users=users)
+
+    @app.route('/config/deleteuser/<id>', methods=['GET', 'POST'])
+    @login_required
+    def webhook_deleteuser(id):
+        print (request.method)
+        if request.method == 'POST':
+            user = User.query.get_or_404(id)
+            if user.id != current_user.id:
+                db.session.delete(user)
+                db.session.commit()
+        return redirect('/config/listusers')
 
     @app.route('/config/listrepos', methods=['GET', 'POST'])
     @login_required
