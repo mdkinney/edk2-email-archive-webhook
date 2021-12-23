@@ -163,7 +163,6 @@ def create_app():
     @app.route('/config/deleteuser/<id>', methods=['GET', 'POST'])
     @login_required
     def webhook_deleteuser(id):
-        print (request.method)
         if request.method == 'POST':
             user = User.query.get_or_404(id)
             if user.id != current_user.id:
@@ -174,11 +173,6 @@ def create_app():
     @app.route('/config/listrepos', methods=['GET', 'POST'])
     @login_required
     def webhook_repos():
-        if request.method == 'POST':
-            if request.form.get('home'):
-                return redirect('/')
-            if request.form.get('add'):
-                print (request.form.get('add'))
         webhookconfigurations = WebhookConfiguration.query.all()
         return render_template('webhooklistrepos.html', webhookconfigurations=webhookconfigurations)
 
@@ -187,7 +181,7 @@ def create_app():
     def webhook_addrepo():
         form = WebhookConfigurationForm(request.form)
         if request.method == 'GET':
-            return render_template('webhookaddrepo.html', form=form)
+            return render_template('webhookaddrepo.html', form=form, title="Add Repository")
         if request.method == 'POST' and form.validate_on_submit():
             if 'home' in request.form:
                 return redirect('/')
@@ -197,7 +191,7 @@ def create_app():
             form.populate_obj(webhookconfiguration)
             db.session.add(webhookconfiguration)
             db.session.commit()
-            return redirect('/config/listrepos')
+        return redirect('/config/listrepos')
 
     @app.route('/config/updaterepo/<id>', methods=['GET', 'POST'])
     @login_required
@@ -220,22 +214,24 @@ jasd hakjh dkajs dkjas kjdh askjdkasj dhkjas hdkjha skjd hkajsh dkja hskjdas
 asjkdh aksjd kjas kda sk kd sakjdhkash dkjas dka skhd askjahkajdashkdh skjdskajdhaskj hdkjas hdkjas hdkjahs kjda hk
 '''
         webhook_addlogentry (webhookconfiguration.GithubOrgName, webhookconfiguration.GithubRepoName, text)
-        if form.validate_on_submit():
+        if request.method == 'GET':
+            return render_template('webhookaddrepo.html', form=form, title="Update Repository Settings")
+        if request.method == 'POST' and form.validate_on_submit():
             if 'home' in request.form:
                 return redirect('/')
             if 'cancel' in request.form:
                 return redirect('/config/listrepos')
             form.populate_obj(webhookconfiguration)
             db.session.commit()
-            return redirect('/config/listrepos')
-        return render_template('webhookaddrepo.html', form=form)
+        return redirect('/config/listrepos')
 
     @app.route('/config/deleterepo/<id>', methods=['GET', 'POST'])
     @login_required
     def webhook_deleterepo(id):
-        webhookconfiguration = WebhookConfiguration.query.get_or_404(id)
-        db.session.delete(webhookconfiguration)
-        db.session.commit()
+        if request.method == 'POST':
+            webhookconfiguration = WebhookConfiguration.query.get_or_404(id)
+            db.session.delete(webhookconfiguration)
+            db.session.commit()
         return redirect('/config/listrepos')
 
     def webhook_addlogentry (OrgName, RepoName, Text):

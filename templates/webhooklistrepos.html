@@ -1,46 +1,46 @@
-{% extends 'bootstrap/base.html' %}
-{% import "bootstrap/wtf.html" as wtf %}
-
-{% block title %}
-TianoCore Code Review Archive Service Configure Webhook
-{% endblock %}
-
+{% extends "flask_user_layout.html" %}
 
 {% block content %}
-
-<div class="container">
-  <div class="row">
-    <div class="col-md-10 col-lg-8 mx-lg-auto mx-md-auto">
-
-      <h1 class="pt-5 pb-2">TianoCore Code Review Archive Service</h1>
-      <h1 class="pt-5 pb-2">Configure Webhook Settings</h1>
-      {% for webhookconfiguration in webhookconfigurations %}
-      <h3>
-        <form style="width:100px; display:inline-block;" method="get" action="/config/logsrepo/{{ webhookconfiguration.id }}">
-          <input type="submit" value="Logs" name="logs"/>
+<head>
+  <style>
+  table, th, td {
+    border: 3px solid black;
+    text-align:center;
+    padding: 5px;
+  }
+  </style>
+  </head>
+<body>
+<table>
+  <caption>Repositories [<a href={{ url_for('webhook_addrepo') }}>Add Repository</a>]</caption>
+  <tr>
+    <th>Repository</th>
+    <th>Email Archive Address</th>
+    <th>Send Email</th>
+    <th>Action</th>
+    <th>Action</th>
+  </tr>
+  {% for webhookconfiguration in webhookconfigurations %}
+    <tr>
+      <td>
+        <a href="/config/logsrepo/{{ webhookconfiguration.id }}">
+          {{ webhookconfiguration.GithubOrgName }}/{{ webhookconfiguration.GithubRepoName }}
+        </a>
+      </td>
+      <td>{{ webhookconfiguration.EmailArchiveAddress }}</td>
+      <td>{{ webhookconfiguration.SendEmail }}</td>
+      <td>
+        <form method="get" action="/config/updaterepo/{{ webhookconfiguration.id }}">
+          <input type="submit" value="Settings" name="settings"/>
         </form>
-        <form style="width:100px; display:inline-block;" method="get" action="/config/updaterepo/{{ webhookconfiguration.id }}">
-          <input type="submit" value="Update" name="update"/>
-        </form>
-        {{ webhookconfiguration.GithubOrgName }}
-        {{ webhookconfiguration.GithubRepoName }}
-        <form style="width:100px; display:inline-block;" method="post" action="/config/deleterepo/{{ webhookconfiguration.id }}">
+      </td>
+      <td>
+        <form method="post" action="/config/deleterepo/{{ webhookconfiguration.id }}" onSubmit="return confirm('Are you sure you wish to delete {{ webhookconfiguration.GithubOrgName }}/{{ webhookconfiguration.GithubRepoName }}?');">
           <input type="submit" value="Delete" name="delete"/>
         </form>
-      </h3>
-      {% endfor %}
-      <h3>
-        <form style="width:100px; display:inline-block;" method="get" action="/config/addrepo">
-          <input type="submit" value="Add" name="add"/>
-        </form>
-        <form style="width:100px; display:inline-block;" method="get" action="/">
-          <input type="submit" value="Home" name="home"/>
-        </form>
-      </h3>
-    <p class="pt-5"><strong>{{ message }}</strong></p>
-
-    </div>
-  </div>
-</div>
-
+      </td>
+    </tr>
+  {% endfor %}
+</table>
+</body>
 {% endblock %}
