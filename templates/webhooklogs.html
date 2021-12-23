@@ -1,45 +1,45 @@
-{% extends 'bootstrap/base.html' %}
-{% import "bootstrap/wtf.html" as wtf %}
-
-{% block title %}
-TianoCore Code Review Archive Service Configure Webhook
-{% endblock %}
-
+{% extends "flask_user_layout.html" %}
 
 {% block content %}
-
-<div class="container">
-  <div class="row">
-    <div class="col-md-10 col-lg-8 mx-lg-auto mx-md-auto">
-
-      <h1 class="pt-5 pb-2">TianoCore Code Review Archive Service</h1>
-      <h1 class="pt-5 pb-2">Webhook Logs {{ webhookconfiguration.GithubOrgName }}/{{ webhookconfiguration.GithubRepoName}} </h1>
-      <h3>
-        <form style="width:100px; display:inline-block;" method="get" action="/config/listrepos">
-          <input type="submit" value="Back" name="back"/>
-        </form>
-        <form style="width:100px; display:inline-block;" method="get" action="/">
-          <input type="submit" value="Home" name="home"/>
-        </form>
-      </h3>
-      <div class="column" style="width: 50%; float:left">
-        <h3 style="text-align:center;">Log Entries</h3>
-        <ul style="list-style: none;">
-          {% for log in logs %}
-            <li style="font-family:courier;">
-              <a href="/config/logsrepo/{{ webhookconfiguration.id }}/{{log.id}}">{{ log.TimeStamp }}  {{ log.Type.name }}</a>
-            </li>
-          {% endfor %}
-        </ul>
-      </div>
-      <div class="column" style="width: 50%; float:right">
-        <h3 style="text-align:center;">Log Details</h3>
-        <textarea wrap="off" cols="80" rows="{{rows}}" style="border: 1px solid grey; width:200%;">{{ text }}</textarea>
-      </div>
-      <p class="pt-5"><strong>{{ message }}</strong></p>
-
-    </div>
+<a href={{ url_for('webhook_repos') }}>Repositories</a>
+<td>
+  <form method="post" action="/config/clearlogrepo/{{ webhookconfiguration.id }}" onSubmit="return confirm('Are you sure you wish to clear log {{ webhookconfiguration.GithubOrgName }}/{{ webhookconfiguration.GithubRepoName }}?');">
+    <input type="submit" value="Clear Log" name="clearlog"/>
+  </form>
+</td>
+<div class="row">
+  <div class="column" style="width: 25%; float:left;">
+    <head>
+      <style>
+      table, th, td {
+        border: 3px solid black;
+        text-align:center;
+        padding: 5px;
+      }
+      </style>
+    </head>
+    <body>
+    <table>
+      <caption>{{ webhookconfiguration.GithubOrgName }}/{{ webhookconfiguration.GithubRepoName}}</caption>
+      <tr>
+        <th>id</th>
+        <th>Date</th>
+        <th>Time</th>
+        <th>Type</th>
+      </tr>
+      {% for log in logs %}
+        <tr>
+          <td><a href="/config/logsrepo/{{ webhookconfiguration.id }}/{{log.id}}">{{ log.id }}</a></td>
+          <td>{{ log.TimeStamp.date() }}</td>
+          <td>{{ log.TimeStamp.time() }}</td>
+          <td>{{ log.Type.name }}</td>
+        </tr>
+      {% endfor %}
+    </table>
+    </body>
+  </div>
+  <div class="column" style="width: 75%; float:right;">
+    <textarea wrap="off" cols="80" rows="{{rows}}" style="border: 3px solid grey;">{{ text }}</textarea>
   </div>
 </div>
-
 {% endblock %}

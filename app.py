@@ -196,7 +196,6 @@ def create_app():
     @app.route('/config/updaterepo/<id>', methods=['GET', 'POST'])
     @login_required
     def webhook_updaterepo(id):
-        print ('Update', id)
         webhookconfiguration = WebhookConfiguration.query.get_or_404(id)
         form = WebhookConfigurationForm(obj=webhookconfiguration)
         text = 'Update ' + str(webhookconfiguration) + ' ' + str(form) + '\n\n'
@@ -265,6 +264,16 @@ asjkdh aksjd kjas kda sk kd sakjdhkash dkjas dka skhd askjahkajdashkdh skjdskajd
             text=text,
             rows=len(text.splitlines()) + 1
             )
+
+    @app.route('/config/clearlogrepo/<repoid>', methods=['GET', 'POST'])
+    @login_required
+    def webhook_clearlogrepo(repoid):
+        if request.method == 'POST':
+            webhookconfiguration = WebhookConfiguration.query.get_or_404(repoid)
+            for log in webhookconfiguration.children:
+                db.session.delete(log)
+            db.session.commit()
+        return redirect('/config/logsrepo/'+str(repoid))
 
     @app.route('/webhook/<OrgName>/<RepoName>', methods=['GET', 'POST'])
     def webhook(OrgName, RepoName):
