@@ -12,9 +12,7 @@ TianoCore GitHub Webhook
 '''
 from __future__ import print_function
 
-import os
 import sys
-import argparse
 import hmac
 import datetime
 from json import dumps
@@ -26,6 +24,7 @@ from SendEmails import SendEmails
 from FetchPullRequest import FetchPullRequest
 from FetchPullRequest import FormatPatch
 from FetchPullRequest import FormatPatchSummary
+from Models import LogTypeEnum
 
 REVIEW_REQUEST     = '[CodeReview] Review-request @'
 REVIEWED_BY        = '[CodeReview] Reviewed-by'
@@ -148,9 +147,14 @@ def GetReviewCommentsFromReview(Review, CommentId, CommentInReplyToId, CommentId
                 GetReviewComments (Comment, ReviewComments, CommentIdDict)
     return ReviewComments
 
-def ProcessGithubRequest(GITHUB_TOKEN, GITHUB_WEBHOOK_SECRET, GITHUB_REPO_WHITE_LIST, EmailArchiveAddress, SendEmailEnabled, app, Verbose):
-    if Verbose:
-        print (request.headers)
+def ProcessGithubRequest(app, webhookconfiguration):
+    GITHUB_TOKEN           = webhookconfiguration.GithubToken
+    GITHUB_WEBHOOK_SECRET  = webhookconfiguration.GithubWebhookSecret
+    GITHUB_REPO_WHITE_LIST = [webhookconfiguration.GithubOrgName + '/' + webhookconfiguration.GithubRepoName]
+    EmailArchiveAddress    = webhookconfiguration.EmailArchiveAddress
+    SendEmailEnabled       = webhookconfiguration.SendEmail
+
+    webhookconfiguration.AddLogEntry (LogTypeEnum.Request, str(request.headers))
 
     # Only POST is implemented
     if request.method != 'POST':
@@ -160,32 +164,35 @@ def ProcessGithubRequest(GITHUB_TOKEN, GITHUB_WEBHOOK_SECRET, GITHUB_REPO_WHITE_
     # Enforce secret, so not just anybody can trigger these hooks
     secret = GITHUB_WEBHOOK_SECRET
     if secret:
-        # Only SHA1 is supported
-        header_signature = request.headers.get('X-Hub-Signature')
+        # Check for SHA256 signature
+        header_signature = request.headers.get('X-Hub-Signature-256')
         if header_signature is None:
-            print (403, "No header signature found")
-            abort(403, "No header signature found")
+            # Check for SHA1 signature
+            header_signature = request.headers.get('X-Hub-Signature')
+            if header_signature is None:
+                print (403, "No header signature found")
+                abort(403, "No header signature found")
 
         sha_name, signature = header_signature.split('=')
-        if sha_name != 'sha1':
-            print(501, "Only SHA1 is supported")
-            abort(501, "Only SHA1 is supported")
+        if sha_name not in ['sha256', 'sha1']:
+            print(501, "Only SHA256 and SHA1 are supported")
+            abort(501, "Only SHA256 and SHA1 are supported")
 
         # HMAC requires the key to be bytes, but data is string
-        mac = hmac.new(bytes(secret, 'utf-8'), msg=request.get_data(), digestmod='sha1')
+        mac = hmac.new(bytes(secret, 'utf-8'), msg=request.get_data(), digestmod=sha_name)
 
         # Python does not have hmac.compare_digest prior to 2.7.7
         if sys.hexversion >= 0x020707F0:
             if not hmac.compare_digest(str(mac.hexdigest()), str(signature)):
                 print(403, "hmac compare digest failed")
-                abort(403)
+                abort(403, "hmac compare digest failed")
         else:
             # What compare_digest provides is protection against timing
             # attacks; we can live without this protection for a web-based
             # application
             if not str(mac.hexdigest()) == str(signature):
                 print(403, "hmac compare digest failed")
-                abort(403)
+                abort(403, "hmac compare digest failed")
 
     # Implement ping
     event = request.headers.get('X-GitHub-Event', 'ping')
@@ -203,6 +210,8 @@ def ProcessGithubRequest(GITHUB_TOKEN, GITHUB_WEBHOOK_SECRET, GITHUB_REPO_WHITE_
     except Exception:
         print(400, "Request parsing failed")
         abort(400, "Request parsing failed")
+
+    webhookconfiguration.AddLogEntry (LogTypeEnum.Payload, dumps(payload, indent=2))
 
     #
     # Skip push and create events
@@ -258,11 +267,9 @@ def ProcessGithubRequest(GITHUB_TOKEN, GITHUB_WEBHOOK_SECRET, GITHUB_REPO_WHITE_
     if event == 'issue_comment':
         action = payload['action']
         if action not in ['created', 'edited', 'deleted']:
-            print ('skip issue_comment event with action other than created or edited')
-            return dumps({'status': 'skipped'})
+            return dumps({'status': 'ignore issue_comment event with action other than created or edited'})
         if 'pull_request' not in payload['issue']:
-            print ('skip issue_comment event without an associated pull request')
-            return dumps({'status': 'skipped'})
+            return dumps({'status': 'ignore issue_comment event without an associated pull request'})
 
         #
         # Use GitHub API to get Pull Request
@@ -271,18 +278,17 @@ def ProcessGithubRequest(GITHUB_TOKEN, GITHUB_WEBHOOK_SECRET, GITHUB_REPO_WHITE_
             HubRepo = Hub.get_repo (payload['repository']['full_name'])
             HubPullRequest = HubRepo.get_pull(payload['issue']['number'])
         except:
+            raise
             #
             # Skip requests if the PyGitHub objects can not be retrieved
             #
-            print ('skip issue_comment event for which the PyGitHub objects can not be retrieved')
-            return dumps({'status': 'skipped'})
+            return dumps({'status': 'ignore issue_comment event for which the PyGitHub objects can not be retrieved'})
 
         #
         # Skip pull request that is not open
         #
         if HubPullRequest.state != 'open':
-            print ('Skip issue_comment event against a pull request that is not open')
-            return dumps({'status': 'skipped'})
+            return dumps({'status': 'ignore issue_comment event against a pull request that is not open'})
 
         #
         # Skip pull request with a base repo that is different than the expected repo
