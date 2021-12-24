@@ -14,90 +14,62 @@ import os
 import time
 import email
 import smtplib
+from Models import LogTypeEnum
 
 def ParseEmailAddress(Address):
     EmailAddress = Address.rsplit('<',1)[1].split('>',1)[0].strip()
     EmailName    = (Address.rsplit('<',1)[0] + Address.rsplit('>')[1]).strip()
     return EmailAddress, EmailName
 
-def SendEmails (HubPullRequest, EmailContents, SendEmailEnabled, app):
-    if SendEmailEnabled:
-        #
-        # Send emails to SMTP Server
-        #
-        try:
+def SendEmails (HubPullRequest, EmailContents, SendEmailEnabled, app, webhookconfiguration, eventlog):
+    try:
+        if SendEmailEnabled:
+            #
+            # Send emails to SMTP Server
+            #
             SmtpServer = smtplib.SMTP(app.config['MAIL_SERVER'], app.config['MAIL_PORT'])
             SmtpServer.starttls()
             SmtpServer.ehlo()
             SmtpServer.login(app.config['MAIL_USERNAME'], app.config['MAIL_PASSWORD'])
-            Index = 0
-            for Email in EmailContents:
-                Index = Index + 1
-                EmailMessage = email.message_from_string(Email)
-                print ('pr[%d] email[%d]' % (HubPullRequest.number, Index), '----> SMTP Email Start <----')
-                print (Email)
-                print ('pr[%d] email[%d]' % (HubPullRequest.number, Index), '----> SMTP Email End <----')
-                if 'From' in EmailMessage:
-                    try:
-                        FromAddress, FromName = ParseEmailAddress(EmailMessage['From'])
-                    except:
-                        print ('Parsed From: Bad address:', EmailMessage['From'])
-                        FromAddress = 'webhook@tianocore.org'
-                        FromName    = 'From %s via TianoCore Webhook' % (HubPullRequest.user.login)
-                else:
-                    print ('Parsed From: Missing address:')
-                    FromAddress = 'webhook@tianocore.org'
-                    FromName    = 'From %s via TianoCore Webhook' % (HubPullRequest.user.login)
-                ToList = []
-                if 'To' in EmailMessage:
-                    ToList = ToList + EmailMessage['To'].split(',')
-                if 'Cc' in EmailMessage:
-                    ToList = ToList + EmailMessage['Cc'].split(',')
-                try:
-                    SmtpServer.sendmail(FromAddress, ToList, Email)
-                    print ('SMTP send mail success')
-                except:
-                    print ('ERROR: SMTP send mail failed')
-            SmtpServer.quit()
-        except:
-            print ('SendEmails: error: can not connect or login or send messages.')
-    else:
         Index = 0
         for Email in EmailContents:
-            Index = Index + 1
             EmailMessage = email.message_from_string(Email)
-            print ('pr[%d] email[%d]' % (HubPullRequest.number, Index), '----> Draft Email Start <----')
             if 'From' in EmailMessage:
                 try:
-                    EmailAddress, EmailName = ParseEmailAddress(EmailMessage['From'])
-                    print ('Parsed From:', EmailAddress, EmailName)
+                    FromAddress, FromName = ParseEmailAddress(EmailMessage['From'])
                 except:
-                    print ('Parsed From: Bad address:', EmailMessage['From'])
+                    FromAddress = 'webhook@tianocore.org'
+                    FromName    = 'From %s via TianoCore Webhook' % (HubPullRequest.user.login)
             else:
-                print ('Parsed From: Missing address:')
-            UniqueAddressList = []
+                FromAddress = 'webhook@tianocore.org'
+                FromName    = 'From %s via TianoCore Webhook' % (HubPullRequest.user.login)
+            ToList = []
             if 'To' in EmailMessage:
                 for Address in EmailMessage['To'].split(','):
                     try:
                         EmailAddress, EmailName = ParseEmailAddress(Address)
-                        if EmailAddress.lower() in UniqueAddressList:
+                        if EmailAddress.lower() in ToList:
                             continue
-                        UniqueAddressList.append(EmailAddress.lower())
-                        print ('Parsed To:', EmailAddress, EmailName)
+                        ToList.append(EmailAddress.lower())
                     except:
-                        print ('Parsed To: Bad address:', Address)
                         continue
             if 'Cc' in EmailMessage:
                 for Address in EmailMessage['Cc'].split(','):
                     try:
                         EmailAddress, EmailName = ParseEmailAddress(Address)
-                        if EmailAddress.lower() in UniqueAddressList:
+                        if EmailAddress.lower() in ToList:
                             continue
-                        UniqueAddressList.append(EmailAddress.lower())
-                        print ('Parsed Cc:', EmailAddress, EmailName)
+                        ToList.append(EmailAddress.lower())
                     except:
-                        print ('Parsed Cc: Bad address:', Address)
                         continue
-            print('--------------------')
-            print (Email)
-            print ('pr[%d] email[%d]' % (HubPullRequest.number, Index), '----> Draft Email End   <----')
+            eventlog.AddLogEntry (LogTypeEnum.Email, 'pr[%d] email[%d]' % (HubPullRequest.number, Index), Email)
+            if SendEmailEnabled:
+                try:
+                    SmtpServer.sendmail(FromAddress, ToList, Email)
+                except:
+                    eventlog.AddLogEntry (LogTypeEnum.Email, 'pr[%d] email[%d]' % (HubPullRequest.number, Index), 'SMTP ERROR: Send message failed')
+            Index = Index + 1
+        if SendEmailEnabled:
+            SmtpServer.quit()
+    except:
+        eventlog.AddLogEntry (LogTypeEnum.Email, 'pr[%d]' % (HubPullRequest.number), 'SMTP ERROR: SMTP unable to connect or login or send messages')

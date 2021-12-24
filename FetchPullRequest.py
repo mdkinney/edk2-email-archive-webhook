@@ -16,6 +16,7 @@ import git
 import email
 import textwrap
 import datetime
+from Models import LogTypeEnum
 
 class Progress(git.remote.RemoteProgress):
     def __init__(self):
@@ -28,7 +29,7 @@ class Progress(git.remote.RemoteProgress):
         sys.stdout.write(Line)
         self.PreviousLine = Line
 
-def FetchPullRequest (HubPullRequest, Depth = 200):
+def FetchPullRequest (HubPullRequest, eventlog, Depth = 200):
     #
     # Fetch the base.ref branch and current PR branch from the base repository
     # of the pull request
@@ -36,44 +37,44 @@ def FetchPullRequest (HubPullRequest, Depth = 200):
     RepositoryPath = os.path.normpath (os.path.join ('Repository', HubPullRequest.base.repo.full_name))
     if os.path.exists (RepositoryPath):
         try:
-            print ('pr[%d]' % (HubPullRequest.number), 'mount', RepositoryPath)
+            eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d] mount' % (HubPullRequest.number), '')
             GitRepo = git.Repo(RepositoryPath)
             Origin = GitRepo.remotes['origin']
         except:
             try:
-                print ('pr[%d]' % (HubPullRequest.number), 'init', RepositoryPath)
+                eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d] init' % (HubPullRequest.number), '')
                 GitRepo = git.Repo.init (RepositoryPath, bare=True)
                 Origin = GitRepo.create_remote ('origin', HubPullRequest.base.repo.html_url)
             except:
-                print ('pr[%d]' % (HubPullRequest.number), 'init', RepositoryPath, 'FAILED')
+                eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d] init FAIL' % (HubPullRequest.number), '')
                 return None, None
     else:
         try:
-            print ('pr[%d]' % (HubPullRequest.number), 'init', RepositoryPath)
+            eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d] init' % (HubPullRequest.number), '')
             os.makedirs (RepositoryPath)
             GitRepo = git.Repo.init (RepositoryPath, bare=True)
             Origin = GitRepo.create_remote ('origin', HubPullRequest.base.repo.html_url)
         except:
-            print ('pr[%d]' % (HubPullRequest.number), 'init', RepositoryPath, 'FAILED')
+            eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d] init FAIL' % (HubPullRequest.number), '')
             return None, None
     #
     # Shallow fetch base.ref branch from origin
     #
     try:
-        print ('pr[%d]' % (HubPullRequest.number), 'fetch', HubPullRequest.base.ref, 'from', RepositoryPath)
+        eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d] fetch' % (HubPullRequest.number), HubPullRequest.base.ref)
         Origin.fetch(HubPullRequest.base.ref, progress=Progress(), depth = Depth)
     except:
-        print ('pr[%d]' % (HubPullRequest.number), 'fetch', HubPullRequest.base.ref, 'from', RepositoryPath, 'FAILED')
+        eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d] fetch FAIL' % (HubPullRequest.number), HubPullRequest.base.ref)
         return None, None
     #
     # Fetch the current pull request branch from origin
     #
     try:
-        print ('pr[%d]' % (HubPullRequest.number), 'fetch pull request', HubPullRequest.number, 'from', RepositoryPath)
+        eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d] fetch Start' % (HubPullRequest.number), '')
         Origin.fetch('+refs/pull/%d/*:refs/remotes/origin/pr/%d/*' % (HubPullRequest.number, HubPullRequest.number), progress=Progress())
-        print ('pr[%d]' % (HubPullRequest.number), 'fetch', RepositoryPath, 'done')
+        eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d] fetch Done' % (HubPullRequest.number), '')
     except:
-        print ('pr[%d]' % (HubPullRequest.number), 'fetch pull request', HubPullRequest.number, 'from', RepositoryPath, 'NOT FOUND')
+        eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d] fetch Fail' % (HubPullRequest.number), '')
         return None, None
 
     #
@@ -82,7 +83,7 @@ def FetchPullRequest (HubPullRequest, Depth = 200):
     try:
         Maintainers = GitRepo.git.show('origin/%s:Maintainers.txt' % (HubPullRequest.base.ref))
     except:
-        print ('Maintainers.txt does not exist in origin/%s' % (HubPullRequest.base.ref))
+        eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d]' % (HubPullRequest.number), 'Maintainers.txt does not exist in origin')
         Maintainers = ''
 
     return GitRepo, Maintainers

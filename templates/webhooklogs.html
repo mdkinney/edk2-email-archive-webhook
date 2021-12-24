@@ -26,6 +26,7 @@
         <th>Date</th>
         <th>Time</th>
         <th>Type</th>
+        <th>SubType</th>
       </tr>
       {% for log in logs %}
         <tr>
@@ -33,13 +34,14 @@
           <td>{{ log.TimeStamp.date() }}</td>
           <td>{{ log.TimeStamp.time() }}</td>
           <td>{{ log.Type.name }}</td>
+          <td>{{ log.SubType }}</td>
         </tr>
       {% endfor %}
     </table>
     </body>
   </div>
   <div class="column" style="width: 75%; float:right;">
-    <textarea wrap="off" cols="80" rows="{{rows}}" style="border: 3px solid grey;">{{ text }}</textarea>
+    <textarea wrap="off" cols="400" rows="{{rows}}" style="border: 3px solid grey;">{{ text }}</textarea>
   </div>
 </div>
 {% endblock %}

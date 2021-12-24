@@ -147,14 +147,12 @@ def GetReviewCommentsFromReview(Review, CommentId, CommentInReplyToId, CommentId
                 GetReviewComments (Comment, ReviewComments, CommentIdDict)
     return ReviewComments
 
-def ProcessGithubRequest(app, webhookconfiguration):
+def ProcessGithubRequest(app, webhookconfiguration, eventlog):
     GITHUB_TOKEN           = webhookconfiguration.GithubToken
     GITHUB_WEBHOOK_SECRET  = webhookconfiguration.GithubWebhookSecret
     GITHUB_REPO_WHITE_LIST = [webhookconfiguration.GithubOrgName + '/' + webhookconfiguration.GithubRepoName]
     EmailArchiveAddress    = webhookconfiguration.EmailArchiveAddress
     SendEmailEnabled       = webhookconfiguration.SendEmail
-
-    webhookconfiguration.AddLogEntry (LogTypeEnum.Request, str(request.headers))
 
     # Only POST is implemented
     if request.method != 'POST':
@@ -197,7 +195,6 @@ def ProcessGithubRequest(app, webhookconfiguration):
     # Implement ping
     event = request.headers.get('X-GitHub-Event', 'ping')
     if event == 'ping':
-        print ('ping request.  respond with pong')
         return dumps({'msg': 'pong'})
 
     # Implement meta
@@ -211,7 +208,10 @@ def ProcessGithubRequest(app, webhookconfiguration):
         print(400, "Request parsing failed")
         abort(400, "Request parsing failed")
 
-    webhookconfiguration.AddLogEntry (LogTypeEnum.Payload, dumps(payload, indent=2))
+    #
+    # Add payload to the log
+    #
+    eventlog.AddLogEntry (LogTypeEnum.Payload, event, dumps(payload, indent=2))
 
     #
     # Skip push and create events
@@ -308,7 +308,7 @@ def ProcessGithubRequest(app, webhookconfiguration):
         # Fetch the git commits for the pull request and return a git repo
         # object and the contents of Maintainers.txt
         #
-        GitRepo, Maintainers = FetchPullRequest (HubPullRequest)
+        GitRepo, Maintainers = FetchPullRequest (HubPullRequest, eventlog)
         if GitRepo is None or Maintainers is None:
             print ('Skip issue_comment event that can not be fetched')
             return dumps({'status': 'skipped'})
@@ -322,7 +322,6 @@ def ProcessGithubRequest(app, webhookconfiguration):
         for Event in Events:
             if Event.event in ['head_ref_force_pushed', 'reopened']:
                 PatchSeriesVersion = PatchSeriesVersion + 1;
-
 
         PullRequestAddressList = []
         CommitShaList = []
@@ -374,7 +373,7 @@ def ProcessGithubRequest(app, webhookconfiguration):
         #
         # Send any generated emails
         #
-        SendEmails (HubPullRequest, [Summary], SendEmailEnabled, app)
+        SendEmails (HubPullRequest, [Summary], SendEmailEnabled, app, webhookconfiguration, eventlog)
 
         print ('----> Process Event Done <----', event, payload['action'])
         return dumps({'msg': 'issue_comment created or edited'})
@@ -453,7 +452,7 @@ def ProcessGithubRequest(app, webhookconfiguration):
             # Fetch the git commits for the pull request and return a git repo
             # object and the contents of Maintainers.txt
             #
-            GitRepo, Maintainers = FetchPullRequest (HubPullRequest)
+            GitRepo, Maintainers = FetchPullRequest (HubPullRequest, eventlog)
             if GitRepo is None or Maintainers is None:
                 print ('Skip commit_comment event that can not be fetched')
                 continue
@@ -514,7 +513,7 @@ def ProcessGithubRequest(app, webhookconfiguration):
         #
         # Send any generated emails
         #
-        SendEmails (HubPullRequest, EmailContents, SendEmailEnabled, app)
+        SendEmails (HubPullRequest, EmailContents, SendEmailEnabled, app, eventlog)
 
         print ('----> Process Event Done <----', event, payload['action'])
         return dumps({'msg': 'commit_comment created or edited'})
@@ -654,7 +653,7 @@ def ProcessGithubRequest(app, webhookconfiguration):
         # Fetch the git commits for the pull request and return a git repo
         # object and the contents of Maintainers.txt
         #
-        GitRepo, Maintainers = FetchPullRequest (HubPullRequest)
+        GitRepo, Maintainers = FetchPullRequest (HubPullRequest, eventlog)
         if GitRepo is None or Maintainers is None:
             print ('Skip pull_request_review_comment event that can not be fetched')
             return dumps({'status': 'skipped'})
@@ -721,7 +720,7 @@ def ProcessGithubRequest(app, webhookconfiguration):
         #
         # Send any generated emails
         #
-        SendEmails (HubPullRequest, EmailContents, SendEmailEnabled, app)
+        SendEmails (HubPullRequest, EmailContents, SendEmailEnabled, app, webhookconfiguration, eventlog)
 
         print ('----> Process Event Done <----', event, payload['action'])
         return dumps({'msg': event + ' created or edited or deleted'})
@@ -775,7 +774,7 @@ def ProcessGithubRequest(app, webhookconfiguration):
         # Fetch the git commits for the pull request and return a git repo
         # object and the contents of Maintainers.txt
         #
-        GitRepo, Maintainers = FetchPullRequest (HubPullRequest)
+        GitRepo, Maintainers = FetchPullRequest (HubPullRequest, eventlog)
         if GitRepo is None or Maintainers is None:
             print ('Skip pull_request_review event that can not be fetched')
             return dumps({'status': 'skipped'})
@@ -892,7 +891,7 @@ def ProcessGithubRequest(app, webhookconfiguration):
         #
         # Send any generated emails
         #
-        SendEmails (HubPullRequest, EmailContents, SendEmailEnabled, app)
+        SendEmails (HubPullRequest, EmailContents, SendEmailEnabled, app, webhookconfiguration, eventlog)
 
         print ('----> Process Event Done <----', event, payload['action'])
         return dumps({'msg': 'pull_request opened or synchronize'})

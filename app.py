@@ -114,15 +114,18 @@ def create_app():
     @login_required
     def webhook_logsrepo(repoid, logid=None):
         webhookconfiguration = WebhookConfiguration.query.get_or_404(repoid)
+        logs = []
+        for eventlog in webhookconfiguration.children:
+            logs = logs + eventlog.children
         if logid:
             text = WebhookLog.query.get_or_404(logid).Text
-        elif webhookconfiguration.children:
-            text = webhookconfiguration.children[0].Text
+        elif logs:
+            text = logs[0].Text
         else:
             text = ''
         return render_template('webhooklogs.html',
             webhookconfiguration=webhookconfiguration,
-            logs=webhookconfiguration.children,
+            logs=logs,
             text=text,
             rows=len(text.splitlines()) + 1
             )
@@ -145,8 +148,16 @@ def create_app():
             abort(400, "Unsupported repo")
         if not webhookconfiguration:
             abort(400, "Unsupported repo")
-        response = ProcessGithubRequest (app, webhookconfiguration)
-        webhookconfiguration.AddLogEntry (LogTypeEnum.Response, str(response))
+        eventlog = webhookconfiguration.AddEventEntry ()
+        #
+        # Add request headers to the log
+        #
+        eventlog.AddLogEntry (LogTypeEnum.Request, request.headers.get('X-GitHub-Event', 'ping'), str(request.headers))
+        response = ProcessGithubRequest (app, webhookconfiguration, eventlog)
+        #
+        # Add response headers to the log
+        #
+        eventlog.AddLogEntry (LogTypeEnum.Response, request.headers.get('X-GitHub-Event', 'ping'), str(response))
         return response
 
     return app

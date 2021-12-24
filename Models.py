@@ -59,14 +59,35 @@ class LogTypeEnum(enum.Enum):
   Email = 3
   Message = 4
   Payload = 5
+  Git = 6
 
 class WebhookLog(db.Model):
     __tablename__ = 'webhook_log'
     id = db.Column(db.Integer, primary_key=True)
-    parent_id = db.Column(db.Integer, db.ForeignKey('webhook_configuration.id'))
+    parent_id = db.Column(db.Integer, db.ForeignKey('webhook_event_log.id'))
     TimeStamp = db.Column(db.DateTime())
     Type = db.Column(db.Enum(LogTypeEnum))
+    SubType = db.Column(db.String())
     Text = db.Column(db.Text())
+
+class WebhookEventLog(db.Model):
+    __tablename__ = 'webhook_event_log'
+    id = db.Column(db.Integer, primary_key=True)
+    parent_id = db.Column(db.Integer, db.ForeignKey('webhook_configuration.id'))
+    TimeStamp = db.Column(db.DateTime())
+    Event = db.Column(db.Text())
+    children            = db.relationship(lambda: WebhookLog)
+
+    def AddLogEntry (self, Type, SubType, Text):
+        entry = WebhookLog()
+        entry.TimeStamp = datetime.datetime.now()
+        entry.Type = Type
+        entry.SubType = SubType
+        entry.Text = Text
+        db.session.add(entry)
+        self.children.append (entry)
+        db.session.commit()
+        return entry
 
 class WebhookConfiguration(db.Model):
     __tablename__ = 'webhook_configuration'
@@ -112,13 +133,11 @@ class WebhookConfiguration(db.Model):
     EmailArchiveAddress = db.Column(db.String)
 
     SendEmail           = db.Column(db.Boolean)
-    children            = db.relationship(lambda: WebhookLog)
+    children            = db.relationship(lambda: WebhookEventLog)
 
-    def AddLogEntry (self, Type, Text):
-        entry = WebhookLog()
-        entry.TimeStamp = datetime.datetime.now()
-        entry.Type = Type
-        entry.Text = Text
+    def AddEventEntry (self):
+        entry = WebhookEventLog()
         db.session.add(entry)
         self.children.append (entry)
         db.session.commit()
+        return entry

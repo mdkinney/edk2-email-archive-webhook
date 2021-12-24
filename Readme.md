@@ -60,18 +60,18 @@ and code review activities.
 
 ## Todo List
 
+* fetch repo base.ref.  Default depth is 200.  Since the only file needed for
+  processing is Maintainers.txt, can likely use Depth = 1.
+
+* Review what happens when the PR is an update to Maintainer.txt.  Need old
+  and new maintainer/reviewer to review the change unless the old maintainer
+  is not longer active.  Must have new maintainer review to accept new role
+
 * Combination of GitHub org and GitHub repo must be unique.
 
 * Add all requests, responses, git commands, and emails to logs.
 
 * Auto clear log entries older than 30 days.
-
-* Add clear logs button in scope of repo
-
-* Add select repo list with hyperlinks for each repo that when selected takes
-  you to log view page.  Buttons at top for HOME, ADD REPO
-
-  When in log view for one repo, buttons at top for BACK, HOME, UPDATE, DELETE, CLEAR LOG
 
 * Git patches with Unicode or invalid UTF8 characters have to be stripped to
   process through python email module.  Example workaround:
@@ -82,12 +82,21 @@ and code review activities.
   complete patches (no comments) can be extracted and applied and get the
   same result.
 
-* Should we upgrade from SHA1 to SHA256 for GitHub Request HMAC auth?
-  Read GitHub pages.
-
-* Add TianoCore Favicon logo
-
 ## Completed Tasks
+
+* DONE 12-23-2021 - Add support for SH256 auth of request header from GitHub
+  Should we upgrade from SHA1 to SHA256 for GitHub Request HMAC auth? YES
+  Read GitHub pages.
+  https://docs.github.com/en/developers/webhooks-and-events/webhooks/securing-your-webhooks
+
+* DONE 12-23-2021 - Add TianoCore Favicon logo
+
+* DONE 12-22-2021 - Add select repo list with hyperlinks for each repo that when selected takes
+  you to log view page.  Buttons at top for HOME, ADD REPO
+
+  When in log view for one repo, buttons at top for BACK, HOME, UPDATE, DELETE, CLEAR LOG
+
+* DONE 12-22-2021 - Add clear logs button in scope of repo
 
 * DONE 12-22-2021: Add form to list users, delete users, and invite new users
 
