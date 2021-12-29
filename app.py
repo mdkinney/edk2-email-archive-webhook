@@ -11,9 +11,11 @@ TianoCore Code Review Archive Service Flask Application
 import os
 import socks
 import smtplib
+from json import dumps
 from flask_bootstrap import Bootstrap
-from flask import Flask, render_template, request, redirect, abort, send_from_directory
+from flask import Flask, render_template, request, redirect, abort, send_from_directory, make_response
 from flask_user import login_required, current_user
+from FetchPullRequest import DeleteRepositoryCache
 from Models import db, User, UserInvitation, CustomUserManager, LogTypeEnum, WebhookLog, WebhookConfiguration
 from Forms import WebhookConfigurationForm
 from Server import ProcessGithubRequest
@@ -115,7 +117,7 @@ def create_app():
     def webhook_logsrepo(repoid, logid=None):
         webhookconfiguration = WebhookConfiguration.query.get_or_404(repoid)
         logs = []
-        for eventlog in webhookconfiguration.children:
+        for eventlog in reversed(webhookconfiguration.children):
             logs = logs + eventlog.children
         if logid:
             text = WebhookLog.query.get_or_404(logid).Text
@@ -125,12 +127,13 @@ def create_app():
             text = ''
         return render_template('webhooklogs.html',
             webhookconfiguration=webhookconfiguration,
+            events=reversed(webhookconfiguration.children),
             logs=logs,
             text=text,
             rows=len(text.splitlines()) + 1
             )
 
-    @app.route('/config/clearlogrepo/<repoid>', methods=['GET', 'POST'])
+    @app.route('/config/clearlogrepo/<repoid>', methods=['POST'])
     @login_required
     def webhook_clearlogrepo(repoid):
         if request.method == 'POST':
@@ -138,26 +141,39 @@ def create_app():
             for log in webhookconfiguration.children:
                 db.session.delete(log)
             db.session.commit()
+            eventlog = webhookconfiguration.AddEventEntry ()
+            eventlog.AddLogEntry (LogTypeEnum.Message, 'Clear log', '')
         return redirect('/config/logsrepo/'+str(repoid))
 
-    @app.route('/webhook/<OrgName>/<RepoName>', methods=['GET', 'POST'])
+    @app.route('/config/deletegitrepocache/<repoid>', methods=['POST'])
+    @login_required
+    def webhook_deletegitrepocache(repoid):
+        if request.method == 'POST':
+            webhookconfiguration = WebhookConfiguration.query.get_or_404(repoid)
+            Status = DeleteRepositoryCache (webhookconfiguration)
+            eventlog = webhookconfiguration.AddEventEntry ()
+            if Status:
+                eventlog.AddLogEntry (LogTypeEnum.Message, 'Delete Repo PASS', '')
+            else:
+                eventlog.AddLogEntry (LogTypeEnum.Message, 'Delete Repo FAIL', '')
+        return redirect('/config/logsrepo/'+str(repoid))
+
+    @app.route('/webhook/<OrgName>/<RepoName>', methods=['POST'])
     def webhook(OrgName, RepoName):
         try:
             webhookconfiguration = WebhookConfiguration.query.filter_by(GithubOrgName = OrgName, GithubRepoName = RepoName).first()
         except:
-            abort(400, "Unsupported repo")
+            abort(400, 'Unsupported repo')
         if not webhookconfiguration:
-            abort(400, "Unsupported repo")
+            abort(400, 'Unsupported repo')
         eventlog = webhookconfiguration.AddEventEntry ()
+
+        status, message = ProcessGithubRequest (app, webhookconfiguration, eventlog)
+        response = make_response({'message': message}, status)
         #
-        # Add request headers to the log
+        # Add response header and json payload to the log
         #
-        eventlog.AddLogEntry (LogTypeEnum.Request, request.headers.get('X-GitHub-Event', 'ping'), str(request.headers))
-        response = ProcessGithubRequest (app, webhookconfiguration, eventlog)
-        #
-        # Add response headers to the log
-        #
-        eventlog.AddLogEntry (LogTypeEnum.Response, request.headers.get('X-GitHub-Event', 'ping'), str(response))
+        eventlog.AddLogEntry (LogTypeEnum.Response, request.headers.get('X-GitHub-Event', 'ping'), str(response.headers) + dumps(response.get_json(), indent=2))
         return response
 
     return app

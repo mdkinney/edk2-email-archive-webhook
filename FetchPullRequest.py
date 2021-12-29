@@ -11,82 +11,123 @@ FetchPullRequest
 from __future__ import print_function
 
 import os
-import sys
 import git
 import email
 import textwrap
-import datetime
+import threading
+import shutil
+import stat
 from Models import LogTypeEnum
+
+GitRepositoryLock = threading.Lock()
 
 class Progress(git.remote.RemoteProgress):
     def __init__(self):
         git.remote.RemoteProgress.__init__(self)
-        self.PreviousLine = ''
+        self.Log = ''
     def update(self, op_code, cur_count, max_count=None, message=''):
-        Line = '\r' + self._cur_line
-        if len(self.PreviousLine) > len(Line):
-            Line = Line + ' ' * (len(self.PreviousLine) - len(Line))
-        sys.stdout.write(Line)
-        self.PreviousLine = Line
+        self.Log += '    ' + self._cur_line + '\n'
 
-def FetchPullRequest (HubPullRequest, eventlog, Depth = 200):
+def FetchPullRequest (HubPullRequest, eventlog, Depth = 1):
     #
     # Fetch the base.ref branch and current PR branch from the base repository
     # of the pull request
     #
+    GitRepositoryLock.acquire()
+    Message = ''
     RepositoryPath = os.path.normpath (os.path.join ('Repository', HubPullRequest.base.repo.full_name))
     if os.path.exists (RepositoryPath):
         try:
-            eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d] mount' % (HubPullRequest.number), '')
+            Message += 'mount local repository %s\n' % (RepositoryPath)
             GitRepo = git.Repo(RepositoryPath)
             Origin = GitRepo.remotes['origin']
+            Message += '  SUCCESS\n'
         except:
             try:
-                eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d] init' % (HubPullRequest.number), '')
+                Message += 'create local repository %s\n' % (RepositoryPath)
                 GitRepo = git.Repo.init (RepositoryPath, bare=True)
                 Origin = GitRepo.create_remote ('origin', HubPullRequest.base.repo.html_url)
+                Message += '  SUCCESS\n'
             except:
-                eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d] init FAIL' % (HubPullRequest.number), '')
+                Message += '  FAIL\n'
+                eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch pr[%d]' % (HubPullRequest.number), Message)
+                GitRepositoryLock.release()
                 return None, None
     else:
         try:
-            eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d] init' % (HubPullRequest.number), '')
+            Message += 'create local repository %s\n' % (RepositoryPath)
             os.makedirs (RepositoryPath)
             GitRepo = git.Repo.init (RepositoryPath, bare=True)
             Origin = GitRepo.create_remote ('origin', HubPullRequest.base.repo.html_url)
+            Message += '  SUCCESS\n'
         except:
-            eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d] init FAIL' % (HubPullRequest.number), '')
+            Message += '  FAIL\n'
+            eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch pr[%d]' % (HubPullRequest.number), Message)
+            GitRepositoryLock.release()
             return None, None
+
     #
     # Shallow fetch base.ref branch from origin
     #
     try:
-        eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d] fetch' % (HubPullRequest.number), HubPullRequest.base.ref)
-        Origin.fetch(HubPullRequest.base.ref, progress=Progress(), depth = Depth)
+        Message += 'git fetch origin %s\n' % (HubPullRequest.base.ref)
+        P = Progress()
+        Origin.fetch(HubPullRequest.base.ref, progress=P, depth = Depth)
+        Message = Message + P.Log
+        Message += '  SUCCESS\n'
     except:
-        eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d] fetch FAIL' % (HubPullRequest.number), HubPullRequest.base.ref)
+        Message += '  FAIL\n'
+        eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch pr[%d]' % (HubPullRequest.number), Message)
+        GitRepositoryLock.release()
         return None, None
     #
     # Fetch the current pull request branch from origin
     #
     try:
-        eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d] fetch Start' % (HubPullRequest.number), '')
+        Message += 'git fetch origin +refs/pull/%d/*:refs/remotes/origin/pr/%d/*\n' % (HubPullRequest.number, HubPullRequest.number)
         Origin.fetch('+refs/pull/%d/*:refs/remotes/origin/pr/%d/*' % (HubPullRequest.number, HubPullRequest.number), progress=Progress())
-        eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d] fetch Done' % (HubPullRequest.number), '')
+        Message += '  SUCCESS\n'
     except:
-        eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d] fetch Fail' % (HubPullRequest.number), '')
+        Message += '  FAIL\n'
+        eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch pr[%d]' % (HubPullRequest.number), Message)
+        GitRepositoryLock.release()
         return None, None
 
     #
     # Retrieve the latest version of Maintainers.txt from origin/base.ref
     #
     try:
+        Message += 'git show origin/%s:Maintainers.txt\n' % (HubPullRequest.base.ref)
         Maintainers = GitRepo.git.show('origin/%s:Maintainers.txt' % (HubPullRequest.base.ref))
+        Message += '  SUCCESS\n'
     except:
-        eventlog.AddLogEntry (LogTypeEnum.Git, 'pr[%d]' % (HubPullRequest.number), 'Maintainers.txt does not exist in origin')
+        Message += '  FAIL.  Maintainers.txt does not exist in origin/%s\n' % (HubPullRequest.base.ref)
         Maintainers = ''
 
+    eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch pr[%d]' % (HubPullRequest.number), Message)
+
+    GitRepositoryLock.release()
     return GitRepo, Maintainers
+
+def DeleteRepositoryCache (webhookconfiguration):
+    RepositoryPath = os.path.normpath (os.path.join ('Repository', webhookconfiguration.GithubOrgName, webhookconfiguration.GithubRepoName))
+    if not os.path.exists (RepositoryPath):
+        return True
+    GitRepositoryLock.acquire()
+    try:
+        # Make sure all dir and files are writable
+        for root, dirs, files in os.walk(RepositoryPath):
+            for dir in dirs:
+                os.chmod(os.path.join(root, dir), stat.S_IWRITE)
+            for file in files:
+                os.chmod(os.path.join(root, file), stat.S_IWRITE)
+        # Remove the entire tree
+        shutil.rmtree(RepositoryPath)
+        Status = True
+    except:
+        Status = False
+    GitRepositoryLock.release()
+    return Status
 
 def ParseCcLines(Body):
     AddressList = []

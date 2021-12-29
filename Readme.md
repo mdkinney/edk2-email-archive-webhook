@@ -14,13 +14,17 @@ and code review activities.
 
 4) Create 32 character SECRET_KEY for Flask (example creation and format)
 
+```
     py
     >>> import secrets
     >>> print(secrets.token_urlsafe(32))
     NHf3_djweYDyGwXPGXjQfwCK4L2tcLDPsRhMRbZ1D9Q
+```
 
+```
     py -c "import secrets; print(secrets.token_urlsafe(32))"
     NHf3_djweYDyGwXPGXjQfwCK4L2tcLDPsRhMRbZ1D9Q
+```
 
 5) Copy config.py.template to config.py and fill in required settings.
 
@@ -39,8 +43,10 @@ and code review activities.
 
    * GitHubWebHookSecret (example creation and format)
 
+```
      py -c "import secrets; print(secrets.token_hex(32))"
      ee6e0fa4f9e4fc255b1c1200f2444843d88c614393a5fdcd31b329626fe86643
+```
 
 ## Development Mode
 
@@ -60,12 +66,39 @@ and code review activities.
 
 ## Todo List
 
+* Update lock around git operations to support a different lock for each repo.
+
+* Update database to auto update if fields or models are added/removed/renamed.
+
+* Add test case with the same commits in more than one open PR.  Commit_comments
+  should generate emails against all PRs with that same commit.
+
+* Need to make sure draft PRs are ignored.
+
+* The current behavior only supports 1 target branch:
+    #
+    # Skip pull requests with a base branch that is not the default branch
+    #
+  Need to extend to support multiple target branches so code reviews against
+  release branches can be supported too.
+
+* Clean up SQLAlchemy database so deleted logs reduce file size.
+
+* Use message queue for received requests
+
+* Use message queue to send emails
+
 * fetch repo base.ref.  Default depth is 200.  Since the only file needed for
   processing is Maintainers.txt, can likely use Depth = 1.
 
-* Review what happens when the PR is an update to Maintainer.txt.  Need old
+  Changed default to Depth=1.  Need to do more testing.
+
+* Review what happens when the PR is an update to Maintainers.txt. Need old
   and new maintainer/reviewer to review the change unless the old maintainer
   is not longer active.  Must have new maintainer review to accept new role
+
+* If Maintainers.txt is updated to add/remove maintainers/reviewers, then the
+  GitHub repository maintainers/reviewers also needs to be updated.
 
 * Combination of GitHub org and GitHub repo must be unique.
 
@@ -83,6 +116,10 @@ and code review activities.
   same result.
 
 ## Completed Tasks
+
+* DONE 12-29-2021 - Add option to delete the repository cache
+
+* DONE 12-29-2021 - Add lock around all methods to perform GIT operations or file operations in Repository
 
 * DONE 12-23-2021 - Add support for SH256 auth of request header from GitHub
   Should we upgrade from SHA1 to SHA256 for GitHub Request HMAC auth? YES

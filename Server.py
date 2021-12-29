@@ -30,9 +30,9 @@ REVIEW_REQUEST     = '[CodeReview] Review-request @'
 REVIEWED_BY        = '[CodeReview] Reviewed-by'
 SERIES_REVIEWED_BY = '[CodeReview] Series-reviewed-by'
 ACKED_BY           = '[CodeReview] Acked-by'
-TESTED_BY          = '[CodeReview] Acked-by'
+TESTED_BY          = '[CodeReview] Tested-by'
 
-def UpdatePullRequestCommitReviewers (Commit, GitHubIdList):
+def UpdatePullRequestCommitReviewers (Commit, GitHubIdList, eventlog):
     #
     # Retrieve all review comments for this commit
     #
@@ -44,25 +44,39 @@ def UpdatePullRequestCommitReviewers (Commit, GitHubIdList):
     #
     # Determine if any reviewers need to be added to this commit
     #
+    Message = ''
     AddReviewers = []
     for Reviewer in GitHubIdList:
+        Message = Message + REVIEW_REQUEST + Reviewer
         if REVIEW_REQUEST + Reviewer not in Body:
             AddReviewers.append(REVIEW_REQUEST + Reviewer + '\n')
+            Message = Message + 'ADD'
+        Message = Message + '\n'
     if AddReviewers != []:
-        for Reviewer in AddReviewers:
-            print ('  ' + '  '.join(AddReviewers))
         #
         # NOTE: This triggers a recursion into this webhook that needs to be
         # ignored
         #
         Commit.create_comment (''.join(AddReviewers))
 
+        #
+        # Add reviewers to the log
+        #
+        eventlog.AddLogEntry (LogTypeEnum.Message, 'Commit Reviewers', Message)
+
     #
     # Return True if reviewers were added to this commit
     #
     return AddReviewers != []
 
-def UpdatePullRequestReviewers (Hub, HubRepo, HubPullRequest, PullRequestGitHubIdList):
+def UpdatePullRequestReviewers (Hub, HubRepo, HubPullRequest, PullRequestGitHubIdList, eventlog):
+    Message = ''
+
+    #
+    # Get list of collaborators for this repository
+    #
+    Collaborators = HubRepo.get_collaborators()
+
     #
     # Get list of reviewers already requested for the pull request
     #
@@ -74,26 +88,60 @@ def UpdatePullRequestReviewers (Hub, HubRepo, HubPullRequest, PullRequestGitHubI
     RemoveReviewerList = []
     for Reviewer in RequestedReviewers:
         if Reviewer.login not in PullRequestGitHubIdList:
-            print ('pr[%d]' % (HubPullRequest.number), 'Remove Reviewer    : @' + Reviewer.login)
+            #
+            # Remove assigned reviewer that no longer required.
+            # Occurs if files/packages are removed from the PR that no longer
+            # require a specific reviewer. Can also occur if Maintainers.txt
+            # is updated with new maintainer/reviewer assignments.
+            #
             RemoveReviewerList.append(Reviewer.login)
+            Message = Message + 'REMOVE REVIEWER  : ' + Reviewer.login + '\n'
+            continue
+        if Reviewer == HubPullRequest.user:
+            #
+            # Author of PR can not be reviewer of PR
+            # Should never occur
+            #
+            RemoveReviewerList.append(Reviewer.login)
+            Message = Message + 'REMOVE AUTHOR     : ' + Reviewer.login + '\n'
+            continue
+        if Reviewer not in Collaborators:
+            #
+            # Reviewer of PR must be a member of repository collborators.
+            # Occurs if reviewer was previously assigned as a collborator, but
+            # was later removed from the list of collborators.
+            #
+            Message = Message + 'NOT A COLLABORATOR: ' + Reviewer.login + '\n'
+            continue
 
     #
     # Determine if any reviewers need to be added
     #
     AddReviewerList = []
-    Collaborators = HubRepo.get_collaborators()
     for Login in PullRequestGitHubIdList:
         Reviewer = Hub.get_user(Login)
         if Reviewer == HubPullRequest.user:
-            print ('pr[%d]' % (HubPullRequest.number), 'Reviewer is Author : @' + Reviewer.login)
-        elif Reviewer not in RequestedReviewers:
-            if Reviewer in Collaborators:
-                print ('pr[%d]' % (HubPullRequest.number), 'Add Reviewer       : @' + Reviewer.login)
-                AddReviewerList.append (Reviewer.login)
-            else:
-                print ('pr[%d]' % (HubPullRequest.number), 'Reviewer is not a collaborator : @' + Reviewer.login)
-        else:
-            print ('pr[%d]' % (HubPullRequest.number), 'Already Assigned   : @' + Reviewer.login)
+            #
+            # Author of PR can not be reviewer of PR
+            #
+            Message = Message + 'AUTHOR            : ' + Reviewer.login + '\n'
+            continue
+        if Reviewer in RequestedReviewers:
+            #
+            # Reviewer is already in set of requested reviewers for this PR
+            #
+            Message = Message + 'ALREADY ASSIGNED  : ' + Reviewer.login + '\n'
+            continue
+        if Reviewer not in Collaborators:
+            #
+            # Reviewer of PR must be a member of repository collborators
+            # Only occurs if reviewer is present in Maintainers.txt, but is
+            # not a GitHub maintainer for the repository.
+            #
+            Message = Message + 'NOT A COLLABORATOR: ' + Reviewer.login + '\n'
+            continue
+        AddReviewerList.append (Reviewer.login)
+        Message = Message + 'ADD REVIEWER     : ' + Reviewer.login + '\n'
 
     #
     # Update review requests
@@ -103,11 +151,17 @@ def UpdatePullRequestReviewers (Hub, HubRepo, HubPullRequest, PullRequestGitHubI
         # NOTE: This may trigger recursion into this webhook
         #
         HubPullRequest.delete_review_request (RemoveReviewerList)
+
     if AddReviewerList != []:
         #
         # NOTE: This may trigger recursion into this webhook
         #
         HubPullRequest.create_review_request (AddReviewerList)
+
+    #
+    # Log reviewer updates
+    #
+    eventlog.AddLogEntry (LogTypeEnum.Message, 'pr[%d] Update Reviewers' % (HubPullRequest.number), Message)
 
 def GetReviewComments(Comment, ReviewComments, CommentIdDict):
     if Comment in ReviewComments:
@@ -148,116 +202,104 @@ def GetReviewCommentsFromReview(Review, CommentId, CommentInReplyToId, CommentId
     return ReviewComments
 
 def ProcessGithubRequest(app, webhookconfiguration, eventlog):
-    GITHUB_TOKEN           = webhookconfiguration.GithubToken
-    GITHUB_WEBHOOK_SECRET  = webhookconfiguration.GithubWebhookSecret
-    GITHUB_REPO_WHITE_LIST = [webhookconfiguration.GithubOrgName + '/' + webhookconfiguration.GithubRepoName]
-    EmailArchiveAddress    = webhookconfiguration.EmailArchiveAddress
-    SendEmailEnabled       = webhookconfiguration.SendEmail
-
     # Only POST is implemented
     if request.method != 'POST':
-        print (501, "only POST is supported")
-        abort(501, "only POST is supported")
+        abort(501, 'only POST is supported')
 
     # Enforce secret, so not just anybody can trigger these hooks
-    secret = GITHUB_WEBHOOK_SECRET
-    if secret:
+    if webhookconfiguration.GithubWebhookSecret:
         # Check for SHA256 signature
         header_signature = request.headers.get('X-Hub-Signature-256')
         if header_signature is None:
             # Check for SHA1 signature
             header_signature = request.headers.get('X-Hub-Signature')
             if header_signature is None:
-                print (403, "No header signature found")
-                abort(403, "No header signature found")
+                abort(403, 'No header signature found')
 
         sha_name, signature = header_signature.split('=')
         if sha_name not in ['sha256', 'sha1']:
-            print(501, "Only SHA256 and SHA1 are supported")
-            abort(501, "Only SHA256 and SHA1 are supported")
+            abort(501, 'Only SHA256 and SHA1 are supported')
 
         # HMAC requires the key to be bytes, but data is string
-        mac = hmac.new(bytes(secret, 'utf-8'), msg=request.get_data(), digestmod=sha_name)
+        mac = hmac.new(bytes(webhookconfiguration.GithubWebhookSecret, 'utf-8'), msg=request.get_data(), digestmod=sha_name)
 
         # Python does not have hmac.compare_digest prior to 2.7.7
         if sys.hexversion >= 0x020707F0:
             if not hmac.compare_digest(str(mac.hexdigest()), str(signature)):
-                print(403, "hmac compare digest failed")
-                abort(403, "hmac compare digest failed")
+                abort(403, 'hmac compare digest failed')
         else:
             # What compare_digest provides is protection against timing
             # attacks; we can live without this protection for a web-based
             # application
             if not str(mac.hexdigest()) == str(signature):
-                print(403, "hmac compare digest failed")
-                abort(403, "hmac compare digest failed")
+                abort(403, 'hmac compare digest failed')
+
+    #
+    # Add request headers to the log
+    # Delayed to this point to prevent logging rejected requests
+    #
+    eventlog.AddLogEntry (LogTypeEnum.Request, request.headers.get('X-GitHub-Event', 'ping'), str(request.headers))
 
     # Implement ping
     event = request.headers.get('X-GitHub-Event', 'ping')
     if event == 'ping':
-        return dumps({'msg': 'pong'})
+        return 200, 'pong'
 
     # Implement meta
     if event == 'meta':
-        return dumps({'msg': 'meta'})
+        return 200, 'meta'
 
     # Gather data
     try:
         payload = request.get_json()
     except Exception:
-        print(400, "Request parsing failed")
-        abort(400, "Request parsing failed")
+        abort(400, 'Request parsing failed')
 
     #
     # Add payload to the log
     #
-    eventlog.AddLogEntry (LogTypeEnum.Payload, event, dumps(payload, indent=2))
+    if 'action' in payload:
+        eventlog.AddLogEntry (LogTypeEnum.Payload, payload['action'], dumps(payload, indent=2))
+    else:
+        eventlog.AddLogEntry (LogTypeEnum.Payload, 'None', dumps(payload, indent=2))
 
     #
-    # Skip push and create events
+    # Ignore push and create events
     #
     if event in ['push', 'create']:
-        print ('skip event', event)
-        return dumps({'status': 'skipped'})
+        return 200,'ignore event %s' % (event)
 
     #
     # Skip payload that does not provide an action
     #
     if 'action' not in payload:
-        print ('skip payload that does not provide an action.  event =', event)
-        return dumps({'status': 'skipped'})
+        return 200, 'ignore event %s with no action' % (event)
 
     #
     # Skip payload that does not provide a repository
     #
     if 'repository' not in payload:
-        print ('skip payload that does not provide a repository.  event=', event)
-        return dumps({'status': 'skipped'})
+        return 200, 'ignore event %s with no repository' % (event)
 
     #
     # Skip payload that does not provide a repository full name
     #
     if 'full_name' not in payload['repository']:
-        print ('skip payload that does not provide a repository full name.  event=', event)
-        return dumps({'status': 'skipped'})
+        return 200, 'ignore event %s with no repository full name' % (event)
 
     #
-    # Skip requests that are not in GITHUB_REPO_WHITE_LIST
+    # Skip requests that are not for the configured repository
     #
-    if payload['repository']['full_name'] not in GITHUB_REPO_WHITE_LIST:
-        print ('skip event for different repo')
-        return dumps({'status': 'skipped'})
+    if payload['repository']['full_name'] != webhookconfiguration.GithubOrgName + '/' + webhookconfiguration.GithubRepoName:
+        return 200, 'ignore event %s for incorrect repository %s' % (event, payload['repository']['full_name'])
 
     #
     # Retrieve Hub object for this repo
     #
     try:
-        Hub = Github (GITHUB_TOKEN)
+        Hub = Github (webhookconfiguration.GithubToken)
     except:
-        print(400, "Invalid GITHUB_TOKEN")
-        abort(400, "Invalid GITHUB_TOKEN")
-
-    print ('----> Process Event <----', event, payload['action'])
+        abort(400, 'Unable to retrieve Hub object using GITHUB_TOKEN')
 
     ############################################################################
     # Process issue comment events
@@ -267,9 +309,9 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
     if event == 'issue_comment':
         action = payload['action']
         if action not in ['created', 'edited', 'deleted']:
-            return dumps({'status': 'ignore issue_comment event with action other than created or edited'})
+            return 200, 'ignore %s event with action %s.  Only created, edited, and deleted are supported.' % (event, action)
         if 'pull_request' not in payload['issue']:
-            return dumps({'status': 'ignore issue_comment event without an associated pull request'})
+            return 200, 'ignore %s event without an associated pull request' % (event)
 
         #
         # Use GitHub API to get Pull Request
@@ -278,31 +320,28 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
             HubRepo = Hub.get_repo (payload['repository']['full_name'])
             HubPullRequest = HubRepo.get_pull(payload['issue']['number'])
         except:
-            raise
             #
             # Skip requests if the PyGitHub objects can not be retrieved
             #
-            return dumps({'status': 'ignore issue_comment event for which the PyGitHub objects can not be retrieved'})
+            return 200, 'ignore %s event for which the PyGitHub objects can not be retrieved' % (event)
 
         #
         # Skip pull request that is not open
         #
         if HubPullRequest.state != 'open':
-            return dumps({'status': 'ignore issue_comment event against a pull request that is not open'})
+            return 200, 'ignore %s event against a pull request with state %s that is not open' % (event, HubPullRequest.state)
 
         #
         # Skip pull request with a base repo that is different than the expected repo
         #
         if HubPullRequest.base.repo.full_name != HubRepo.full_name:
-            print ('Skip issue_comment event against a different repo', HubPullRequest.base.repo.full_name)
-            return dumps({'status': 'skipped'})
+            return 200, 'ignore %s event against unexpected repo %s' % (event, HubPullRequest.base.repo.full_name)
 
         #
         # Skip pull requests with a base branch that is not the default branch
         #
         if HubPullRequest.base.ref != HubRepo.default_branch:
-            print ('Skip issue_comment event against non-default base branch', HubPullRequest.base.ref)
-            return dumps({'status': 'skipped'})
+            return 200, 'ignore %s event against non-default base branch %s' % (event, HubPullRequest.base.ref)
 
         #
         # Fetch the git commits for the pull request and return a git repo
@@ -310,8 +349,7 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
         #
         GitRepo, Maintainers = FetchPullRequest (HubPullRequest, eventlog)
         if GitRepo is None or Maintainers is None:
-            print ('Skip issue_comment event that can not be fetched')
-            return dumps({'status': 'skipped'})
+            return 200, 'ignore %s event for a PR that can not be fetched' % (event)
 
         #
         # Count head_ref_force_pushed and reopened events to determine the
@@ -354,7 +392,7 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
         if action == 'deleted':
             UpdateDeltaTime = -1
         Summary = FormatPatchSummary (
-                    EmailArchiveAddress,
+                    webhookconfiguration.EmailArchiveAddress,
                     event,
                     GitRepo,
                     HubRepo,
@@ -373,10 +411,9 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
         #
         # Send any generated emails
         #
-        SendEmails (HubPullRequest, [Summary], SendEmailEnabled, app, webhookconfiguration, eventlog)
+        SendEmails (HubPullRequest, [Summary], webhookconfiguration.SendEmail, app, webhookconfiguration, eventlog)
 
-        print ('----> Process Event Done <----', event, payload['action'])
-        return dumps({'msg': 'issue_comment created or edited'})
+        return 200, 'successfully processed %s event with action %s' % (event, payload['action'])
 
     ############################################################################
     # Process commit comment events
@@ -386,11 +423,10 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
     if event == 'commit_comment':
         action = payload['action']
         if action not in ['created', 'edited']:
-            print ('skip commit_comment event with action other than created or edited')
-            return dumps({'status': 'skipped'})
+            return 200, 'ignore %s event with action %s.  Only created and edited are supported.' % (event, action)
 
         #
-        # Skip REVIEW_REQUEST comments made by the webhook itself.  This same
+        # Skip REVIEW_REQUEST comments made by the webhook itself. This same
         # information is always present in the patch emails, so filtering these
         # comments prevent double emails when a pull request is opened or
         # synchronized.
@@ -398,8 +434,7 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
         Body = payload['comment']['body'].splitlines()
         for Line in payload['comment']['body'].splitlines():
             if Line.startswith (REVIEW_REQUEST):
-                print ('skip commit_comment event with review request body from this webhook')
-                return dumps({'status': 'skipped'})
+                return 200, 'ignore %s event with REVIEW_REQUEST body generated by this webhook' % (event)
 
         #
         # Search for issues/pull requests that contain the comment's commit_id
@@ -411,10 +446,9 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
         EmailContents   = []
         for Issue in Hub.search_issues('SHA:' + CommitId):
             #
-            # Skip Issue for a different repository
+            # Skip Issue with same commit SHA that is for a different repository
             #
             if Issue.repository.full_name != payload['repository']['full_name']:
-                print ('Skip commit_comment event against a different repo', HubPullRequest.base.repo.full_name)
                 continue
 
             #
@@ -424,28 +458,31 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
                 HubRepo = Issue.repository
                 HubPullRequest = Issue.as_pull_request()
             except:
-                print ('skip commit_comment event for which the PyGitHub objects can not be retrieved')
+                #
+                # Skip Issue if the PyGitHub objects can not be retrieved
+                #
+                eventlog.AddLogEntry (LogTypeEnum.Message, 'PR[%d]' % (HubPullRequest.id), 'ignore %s event for which the PyGitHub objects can not be retrieved' % (event))
                 continue
 
             #
-            # Skip pull request that is not open
+            # Skip Issue for a pull request that is not in the open state
             #
             if HubPullRequest.state != 'open':
-                print ('Skip commit_comment event against a pull request that is not open')
-                return dumps({'status': 'skipped'})
+                eventlog.AddLogEntry (LogTypeEnum.Message, 'PR[%d]' % (HubPullRequest.id), 'ignore %s event against a pull request with state %s that is not open' % (event, HubPullRequest.state))
+                continue
 
             #
             # Skip commit_comment with a base repo that is different than the expected repo
             #
             if HubPullRequest.base.repo.full_name != HubRepo.full_name:
-                print ('Skip commit_comment event against a different repo', HubPullRequest.base.repo.full_name)
+                eventlog.AddLogEntry (LogTypeEnum.Message, 'PR[%d]' % (HubPullRequest.id), 'ignore %s event against unexpected repo %s' % (event, HubPullRequest.base.repo.full_name))
                 continue
 
             #
             # Skip commit_comment with a base branch that is not the default branch
             #
             if HubPullRequest.base.ref != HubRepo.default_branch:
-                print ('Skip commit_comment event against non-default base branch', HubPullRequest.base.ref)
+                eventlog.AddLogEntry (LogTypeEnum.Message, 'PR[%d]' % (HubPullRequest.id), 'ignore %s event against non-default base branch %s' % (event, HubPullRequest.base.ref))
                 continue
 
             #
@@ -454,7 +491,7 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
             #
             GitRepo, Maintainers = FetchPullRequest (HubPullRequest, eventlog)
             if GitRepo is None or Maintainers is None:
-                print ('Skip commit_comment event that can not be fetched')
+                eventlog.AddLogEntry (LogTypeEnum.Message, 'PR[%d]' % (HubPullRequest.id), 'ignore %s event for a PR that can not be fetched' % (event))
                 continue
 
             #
@@ -488,7 +525,7 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
             AddressList, GitHubIdList, EmailList = ParseMaintainerAddresses(Addresses)
 
             Email = FormatPatch (
-                        EmailArchiveAddress,
+                        webhookconfiguration.EmailArchiveAddress,
                         event,
                         GitRepo,
                         HubRepo,
@@ -507,16 +544,14 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
             EmailContents.append (Email)
 
         if EmailContents == []:
-            print ('skip commit_comment that is not for any supported repo')
-            return dumps({'status': 'skipped'})
+            return 200, 'ignore %s event with action %s for which there are no matching issues' % (event, payload['action'])
 
         #
         # Send any generated emails
         #
-        SendEmails (HubPullRequest, EmailContents, SendEmailEnabled, app, eventlog)
+        SendEmails (HubPullRequest, EmailContents, webhookconfiguration.SendEmail, app, webhookconfiguration, eventlog)
 
-        print ('----> Process Event Done <----', event, payload['action'])
-        return dumps({'msg': 'commit_comment created or edited'})
+        return 200, 'successfully processed %s event with action %s' % (event, payload['action'])
 
     ############################################################################
     # Process pull_request_review_comment and pull_request_review events
@@ -531,8 +566,7 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
         UpdateDeltaTime = 0
         if event in ['pull_request_review_comment']:
             if action not in ['edited', 'deleted']:
-                print ('skip pull_request_review_comment event with action other than edited or deleted')
-                return dumps({'status': 'skipped'})
+                return 200, 'ignore %s event with action %s.  Only edited and deleted are supported.' % (event, action)
 
             #
             # Skip REVIEW_REQUEST comments made by the webhook itself.  This same
@@ -543,16 +577,13 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
             Body = payload['comment']['body'].splitlines()
             for Line in payload['comment']['body'].splitlines():
                 if Line.startswith (REVIEW_REQUEST):
-                    print ('skip pull_request_review_comment event with review request body from this webhook')
-                    return dumps({'status': 'skipped'})
+                    return 200, 'ignore %s event with REVIEW_REQUEST body generated by this webhook' % (event)
 
         if event in ['pull_request_review']:
             if action not in ['submitted', 'edited']:
-                print ('skip pull_request_review event with action other than submitted or edited')
-                return dumps({'status': 'skipped'})
+                return 200, 'ignore %s event with action %s.  Only submitted and deleted are supported.' % (event, action)
             if action == 'edited' and payload['changes'] == {}:
-                print ('skip pull_request_review event edited action that has no changes')
-                return dumps({'status': 'skipped'})
+                return 200, 'ignore %s event with action %s that has no changes.' % (event, action)
 
         EmailContents   = []
 
@@ -563,29 +594,25 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
             HubRepo = Hub.get_repo (payload['repository']['full_name'])
             HubPullRequest = HubRepo.get_pull(payload['pull_request']['number'])
         except:
-            print ('skip pull_request_review_comment event for which the PyGitHub objects can not be retrieved')
-            return dumps({'status': 'skipped'})
+            return 200, 'ignore %s event for which the PyGitHub objects can not be retrieved' % (event)
 
         #
         # Skip pull request that is not open
         #
         if HubPullRequest.state != 'open':
-            print ('Skip pull_request_review_comment event against a pull request that is not open')
-            return dumps({'status': 'skipped'})
+            return 200, 'ignore %s event against a pull request with state %s that is not open' % (event, HubPullRequest.state)
 
         #
         # Skip pull_request_review_comment with a base repo that is different than the expected repo
         #
         if HubPullRequest.base.repo.full_name != HubRepo.full_name:
-            print ('Skip pull_request_review_comment event against a different repo', HubPullRequest.base.repo.full_name)
-            return dumps({'status': 'skipped'})
+            return 200, 'ignore %s event against unexpected repo %s' % (event, HubPullRequest.base.repo.full_name)
 
         #
         # Skip pull_request_review_comment with a base branch that is not the default branch
         #
         if HubPullRequest.base.ref != HubRepo.default_branch:
-            print ('Skip pull_request_review_comment event against non-default base branch', HubPullRequest.base.ref)
-            return dumps({'status': 'skipped'})
+            return 200, 'ignore %s event against non-default base branch %s' % (event, HubPullRequest.base.ref)
 
         #
         # Build dictionary of review comments
@@ -655,8 +682,7 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
         #
         GitRepo, Maintainers = FetchPullRequest (HubPullRequest, eventlog)
         if GitRepo is None or Maintainers is None:
-            print ('Skip pull_request_review_comment event that can not be fetched')
-            return dumps({'status': 'skipped'})
+            return 200, 'ignore %s event for a PR that can not be fetched' % (event)
 
         #
         # Count head_ref_force_pushed and reopened events to determine the
@@ -693,7 +719,7 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
         # Generate the summary email patch #0 with body of email prefixed with >.
         #
         Email = FormatPatchSummary (
-                  EmailArchiveAddress,
+                  webhookconfiguration.EmailArchiveAddress,
                   event,
                   GitRepo,
                   HubRepo,
@@ -720,10 +746,9 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
         #
         # Send any generated emails
         #
-        SendEmails (HubPullRequest, EmailContents, SendEmailEnabled, app, webhookconfiguration, eventlog)
+        SendEmails (HubPullRequest, EmailContents, webhookconfiguration.SendEmail, app, webhookconfiguration, eventlog)
 
-        print ('----> Process Event Done <----', event, payload['action'])
-        return dumps({'msg': event + ' created or edited or deleted'})
+        return 200, 'successfully processed %s event with action %s' % (event, payload['action'])
 
     ############################################################################
     # Process pull request events
@@ -731,8 +756,7 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
     if event == 'pull_request':
         action = payload['action']
         if action not in ['opened', 'synchronize', 'edited', 'closed', 'reopened']:
-            print ('skip pull_request event with action other than opened or synchronized')
-            return dumps({'status': 'skipped'})
+            return 200, 'ignore %s event with action %s.  Only opened, synchronize, edited, closed, and reopened are supported.' % (event, action)
 
         #
         # Use GitHub API to get Pull Request
@@ -744,8 +768,7 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
             #
             # Skip requests if the PyGitHub objects can not be retrieved
             #
-            print ('skip pull_request event for which the PyGitHub objects can not be retrieved')
-            return dumps({'status': 'skipped'})
+            return 200, 'ignore %s event for which the PyGitHub objects can not be retrieved' % (event)
 
         #
         # Skip pull request that is not open unless this is the event that is
@@ -753,22 +776,19 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
         #
         if action != 'closed':
             if HubPullRequest.state != 'open':
-                print ('Skip pull_request event against a pull request that is not open')
-                return dumps({'status': 'skipped'})
+                return 200, 'ignore %s event against a pull request with state %s that is not open' % (event, HubPullRequest.state)
 
         #
         # Skip pull request with a base repo that is different than the expected repo
         #
         if HubPullRequest.base.repo.full_name != HubRepo.full_name:
-            print ('Skip PR event against a different repo', HubPullRequest.base.repo.full_name)
-            return dumps({'status': 'skipped'})
+            return 200, 'ignore %s event against unexpected repo %s' % (event, HubPullRequest.base.repo.full_name)
 
         #
         # Skip pull requests with a base branch that is not the default branch
         #
         if HubPullRequest.base.ref != HubRepo.default_branch:
-            print ('Skip PR event against non-default base branch', HubPullRequest.base.ref)
-            return dumps({'status': 'skipped'})
+            return 200, 'ignore %s event against non-default base branch %s' % (event, HubPullRequest.base.ref)
 
         #
         # Fetch the git commits for the pull request and return a git repo
@@ -776,8 +796,7 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
         #
         GitRepo, Maintainers = FetchPullRequest (HubPullRequest, eventlog)
         if GitRepo is None or Maintainers is None:
-            print ('Skip pull_request_review event that can not be fetched')
-            return dumps({'status': 'skipped'})
+            return 200, 'ignore %s event for a PR that can not be fetched' % (event)
 
         NewPatchSeries = False
         PatchSeriesVersion = 1;
@@ -833,13 +852,10 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
             PullRequestEmailList    = list(set(PullRequestEmailList    + EmailList))
 
             if action in ['opened', 'synchronize', 'reopened']:
-
-                print ('pr[%d]' % (HubPullRequest.number), Commit.sha, ' @' + ' @'.join(PullRequestGitHubIdList))
-
                 #
                 # Update the list of required reviewers for this commit
                 #
-                ReviewersUpdated = UpdatePullRequestCommitReviewers (Commit, GitHubIdList)
+                ReviewersUpdated = UpdatePullRequestCommitReviewers (Commit, GitHubIdList, eventlog)
 
                 #
                 # Generate email contents for all commits in a pull request if this is
@@ -849,7 +865,7 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
                 #
                 if NewPatchSeries or ReviewersUpdated:
                     Email = FormatPatch (
-                                EmailArchiveAddress,
+                                webhookconfiguration.EmailArchiveAddress,
                                 event,
                                 GitRepo,
                                 HubRepo,
@@ -865,7 +881,7 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
             #
             # Update the list of required reviewers for the pull request
             #
-            UpdatePullRequestReviewers (Hub, HubRepo, HubPullRequest, PullRequestGitHubIdList)
+            UpdatePullRequestReviewers (Hub, HubRepo, HubPullRequest, PullRequestGitHubIdList, eventlog)
 
         #
         # If this is a new pull request or a forced push on a pull request or an
@@ -878,7 +894,7 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
             if action in ['edited', 'closed']:
                 UpdateDeltaTime = (HubPullRequest.updated_at - HubPullRequest.created_at).seconds
             Summary = FormatPatchSummary (
-                          EmailArchiveAddress,
+                          webhookconfiguration.EmailArchiveAddress,
                           event,
                           GitRepo,
                           HubRepo,
@@ -891,10 +907,8 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
         #
         # Send any generated emails
         #
-        SendEmails (HubPullRequest, EmailContents, SendEmailEnabled, app, webhookconfiguration, eventlog)
+        SendEmails (HubPullRequest, EmailContents, webhookconfiguration.SendEmail, app, webhookconfiguration, eventlog)
 
-        print ('----> Process Event Done <----', event, payload['action'])
-        return dumps({'msg': 'pull_request opened or synchronize'})
+        return 200, 'successfully processed %s event with action %s' % (event, payload['action'])
 
-    print ('skip unsupported event')
-    return dumps({'status': 'skipped'})
+    return 200, 'ignore unsupported event %s with action %s' % (event, payload['action'])

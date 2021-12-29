@@ -6,6 +6,9 @@
   <form method="post" action="/config/clearlogrepo/{{ webhookconfiguration.id }}" onSubmit="return confirm('Are you sure you wish to clear log {{ webhookconfiguration.GithubOrgName }}/{{ webhookconfiguration.GithubRepoName }}?');">
     <input type="submit" value="Clear Log" name="clearlog"/>
   </form>
+  <form method="post" action="/config/deletegitrepocache/{{ webhookconfiguration.id }}" onSubmit="return confirm('Are you sure you wish to delete git repository cache {{ webhookconfiguration.GithubOrgName }}/{{ webhookconfiguration.GithubRepoName }}?');">
+    <input type="submit" value="Delete Git Repository Cache" name="deletegitrepocache"/>
+  </form>
 </td>
 <div class="row">
   <div class="column" style="width: 25%; float:left;">
@@ -28,20 +31,23 @@
         <th>Type</th>
         <th>SubType</th>
       </tr>
-      {% for log in logs %}
-        <tr>
-          <td><a href="/config/logsrepo/{{ webhookconfiguration.id }}/{{log.id}}">{{ log.id }}</a></td>
-          <td>{{ log.TimeStamp.date() }}</td>
-          <td>{{ log.TimeStamp.time() }}</td>
-          <td>{{ log.Type.name }}</td>
-          <td>{{ log.SubType }}</td>
-        </tr>
+      {% for event in events %}
+        <tr><td>{{ event.id }}</td></tr>
+        {% for log in event.children %}
+          <tr>
+            <td><a href="/config/logsrepo/{{ webhookconfiguration.id }}/{{log.id}}">{{ log.id }}</a></td>
+            <td>{{ log.TimeStamp.date() }}</td>
+            <td>{{ log.TimeStamp.time() }}</td>
+            <td>{{ log.Type.name }}</td>
+            <td>{{ log.SubType }}</td>
+          </tr>
+        {% endfor %}
       {% endfor %}
     </table>
     </body>
   </div>
   <div class="column" style="width: 75%; float:right;">
-    <textarea wrap="off" cols="400" rows="{{rows}}" style="border: 3px solid grey;">{{ text }}</textarea>
+    <textarea wrap="off" cols="400" rows="{{rows}}" style="border: 3px solid grey; font-family:'Courier New';font-weight:bold;">{{ text }}</textarea>
   </div>
 </div>
 {% endblock %}

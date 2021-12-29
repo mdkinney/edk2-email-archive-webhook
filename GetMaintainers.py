@@ -8,7 +8,6 @@
 
 from __future__ import print_function
 from collections import defaultdict
-from collections import OrderedDict
 import re
 
 EXPRESSIONS = {
