@@ -50,7 +50,7 @@ def FetchPullRequest (HubPullRequest, eventlog, Depth = 1):
                 Message += '  SUCCESS\n'
             except:
                 Message += '  FAIL\n'
-                eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch pr[%d]' % (HubPullRequest.number), Message)
+                eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (HubPullRequest.number), Message)
                 GitRepositoryLock.release()
                 return None, None
     else:
@@ -62,7 +62,7 @@ def FetchPullRequest (HubPullRequest, eventlog, Depth = 1):
             Message += '  SUCCESS\n'
         except:
             Message += '  FAIL\n'
-            eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch pr[%d]' % (HubPullRequest.number), Message)
+            eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (HubPullRequest.number), Message)
             GitRepositoryLock.release()
             return None, None
 
@@ -77,7 +77,7 @@ def FetchPullRequest (HubPullRequest, eventlog, Depth = 1):
         Message += '  SUCCESS\n'
     except:
         Message += '  FAIL\n'
-        eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch pr[%d]' % (HubPullRequest.number), Message)
+        eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (HubPullRequest.number), Message)
         GitRepositoryLock.release()
         return None, None
     #
@@ -89,7 +89,7 @@ def FetchPullRequest (HubPullRequest, eventlog, Depth = 1):
         Message += '  SUCCESS\n'
     except:
         Message += '  FAIL\n'
-        eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch pr[%d]' % (HubPullRequest.number), Message)
+        eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (HubPullRequest.number), Message)
         GitRepositoryLock.release()
         return None, None
 
@@ -104,7 +104,7 @@ def FetchPullRequest (HubPullRequest, eventlog, Depth = 1):
         Message += '  FAIL.  Maintainers.txt does not exist in origin/%s\n' % (HubPullRequest.base.ref)
         Maintainers = ''
 
-    eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch pr[%d]' % (HubPullRequest.number), Message)
+    eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (HubPullRequest.number), Message)
 
     GitRepositoryLock.release()
     return GitRepo, Maintainers

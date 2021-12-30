@@ -21,9 +21,9 @@ def ParseEmailAddress(Address):
     EmailName    = (Address.rsplit('<',1)[0] + Address.rsplit('>')[1]).strip()
     return EmailAddress, EmailName
 
-def SendEmails (HubPullRequest, EmailContents, SendEmailEnabled, app, webhookconfiguration, eventlog):
+def SendEmails (HubPullRequest, EmailContents, app, webhookconfiguration, eventlog):
     try:
-        if SendEmailEnabled:
+        if webhookconfiguration.SendEmail:
             #
             # Send emails to SMTP Server
             #
@@ -63,13 +63,13 @@ def SendEmails (HubPullRequest, EmailContents, SendEmailEnabled, app, webhookcon
                     except:
                         continue
             eventlog.AddLogEntry (LogTypeEnum.Email, 'pr[%d] email[%d]' % (HubPullRequest.number, Index), Email)
-            if SendEmailEnabled:
+            if webhookconfiguration.SendEmail:
                 try:
                     SmtpServer.sendmail(FromAddress, ToList, Email)
                 except:
                     eventlog.AddLogEntry (LogTypeEnum.Email, 'pr[%d] email[%d]' % (HubPullRequest.number, Index), 'SMTP ERROR: Send message failed')
             Index = Index + 1
-        if SendEmailEnabled:
+        if webhookconfiguration.SendEmail:
             SmtpServer.quit()
     except:
         eventlog.AddLogEntry (LogTypeEnum.Email, 'pr[%d]' % (HubPullRequest.number), 'SMTP ERROR: SMTP unable to connect or login or send messages')

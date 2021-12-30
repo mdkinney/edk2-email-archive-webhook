@@ -66,7 +66,11 @@ and code review activities.
 
 ## Todo List
 
+* Implement unit tests
+
 * Update lock around git operations to support a different lock for each repo.
+  And use of lock around all git operations.  Consider returning list of files
+  modified and set of formatted patches from the Fetch() method.
 
 * Update database to auto update if fields or models are added/removed/renamed.
 
@@ -102,8 +106,6 @@ and code review activities.
 
 * Combination of GitHub org and GitHub repo must be unique.
 
-* Add all requests, responses, git commands, and emails to logs.
-
 * Auto clear log entries older than 30 days.
 
 * Git patches with Unicode or invalid UTF8 characters have to be stripped to
@@ -116,6 +118,8 @@ and code review activities.
   same result.
 
 ## Completed Tasks
+
+* DONE 12-29-2021 - Add all requests, responses, git commands, and emails to logs.
 
 * DONE 12-29-2021 - Add option to delete the repository cache
 
