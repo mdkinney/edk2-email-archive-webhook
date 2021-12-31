@@ -20,6 +20,20 @@ from Models import db, User, UserInvitation, CustomUserManager, LogTypeEnum, Web
 from Forms import WebhookConfigurationForm
 from Server import ProcessGithubRequest
 
+class WebhookContext(object):
+    def __init__(self, app, webhookconfiguration, eventlog):
+        self.app                  = app
+        self.webhookconfiguration = webhookconfiguration
+        self.eventlog             = eventlog
+        self.event                = ''
+        self.action               = ''
+        self.payload              = None
+        self.Hub                  = None
+        self.GitRepo              = None
+        self.HubRepo              = None
+        self.HubPullRequest       = None
+        self.Maintainers          = None
+
 def create_app():
     app = Flask(__name__)
     bootstrap = Bootstrap(app)
@@ -168,7 +182,9 @@ def create_app():
             abort(400, 'Unsupported repo')
         eventlog = webhookconfiguration.AddEventEntry ()
 
-        status, message = ProcessGithubRequest (app, webhookconfiguration, eventlog)
+        Context = WebhookContext (app, webhookconfiguration, eventlog)
+
+        status, message = ProcessGithubRequest (Context)
         response = make_response({'message': message}, status)
         #
         # Add response header and json payload to the log

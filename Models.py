@@ -14,6 +14,7 @@ import enum
 import datetime
 from flask_sqlalchemy import SQLAlchemy
 from flask_user import UserManager, UserMixin
+from wtforms import ValidationError
 
 db = SQLAlchemy()
 
@@ -59,7 +60,6 @@ class LogTypeEnum(enum.Enum):
   Email = 3
   Message = 4
   Payload = 5
-  Git = 6
 
 class WebhookLog(db.Model):
     __tablename__ = 'webhook_log'

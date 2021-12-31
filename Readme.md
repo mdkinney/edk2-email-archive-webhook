@@ -68,20 +68,12 @@ and code review activities.
 
 * Implement unit tests
 
-* Add WebhookContext object class with context for processing request.
-  + app
-  + webhookconfiguration
-  + eventlog
-  + event
-  + action
-  + payload
-  + Hub
-  + GitRepo
-  + HubRepo
-  + HubPullRequest
-  + Maintainers
-  + Status (default 200)
-  + Message (json message to return in response)
+* Change WebhookContext to a class with methods to remove passing Context
+  parameter.
+
+* See if Maintainer.txt can be directly downloaded from GitHub instead of
+  cloning entire branch with depth 0.  May be faster.  Also measure time
+  required to checkout a single PR
 
 * Logs - Show list of events. Hyperlink to list of logs for that event
   Event should provide date/time/event/action.
@@ -90,21 +82,34 @@ and code review activities.
   And use of lock around all git operations.  Consider returning list of files
   modified and set of formatted patches from the Fetch() method.
 
+  See if order of operations can be changed to collect all information required
+  to perform all local git operations at same time making lock on repo directory
+  only one time.
+  + Init
+  + fetch PR
+  + list of files modified
+  + Diff required for emails
+  + send email contents with formatting
+
+* fetch repo base.ref. Default depth is 200. Since the only file needed for
+  processing is Maintainers.txt, can likely use Depth = 1.
+
+  Changed default to Depth=1.  Need to do more testing.
+
+  Only used to get Maintainers.txt.  See other task to get Maintainers.txt
+  directly from github without using git.
+
 * Update database to auto update if fields or models are added/removed/renamed.
 
-* Add test case with the same commits in more than one open PR.  Commit_comments
-  should generate emails against all PRs with that same commit.
+* Add test case with the same commits in more than one open PR. Commit_comments
+  should generate emails against all PRs with that same commit.  Also include
+  same commit SHA in other repos and make sure those other repos are ignored.
 
-* Clean up SQLAlchemy database so deleted logs reduce file size.
+* Clean up SQLAlchemy database so deleted logs reduce database file size.
 
 * Use message queue for received requests
 
 * Use message queue to send emails
-
-* fetch repo base.ref.  Default depth is 200.  Since the only file needed for
-  processing is Maintainers.txt, can likely use Depth = 1.
-
-  Changed default to Depth=1.  Need to do more testing.
 
 * Review what happens when the PR is an update to Maintainers.txt. Need old
   and new maintainer/reviewer to review the change unless the old maintainer
@@ -127,6 +132,19 @@ and code review activities.
   same result.
 
 ## Completed Tasks
+
+* DONE 12-31-2021 - Add WebhookContext object class with context for processing request.
+  + app
+  + webhookconfiguration
+  + eventlog
+  + event
+  + action
+  + payload
+  + Hub
+  + GitRepo
+  + HubRepo
+  + HubPullRequest
+  + Maintainers
 
 * DONE 12-30-2121 - Ignore draft PRs and add case for read_for_review and
   treat the same as reopened.

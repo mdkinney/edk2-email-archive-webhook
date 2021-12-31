@@ -284,11 +284,7 @@ def QuoteCommentList (Comments, Before = '', After = '', LineEnding = '\n', Pref
     return Body
 
 def FormatPatch (
-        EmailArchiveAddress,
-        event,
-        GitRepo,
-        HubRepo,
-        HubPullRequest,
+        Context,
         Commit,
         AddressList,
         PatchSeriesVersion,
@@ -302,6 +298,11 @@ def FormatPatch (
         CommentInReplyToId = None,
         LargePatchLines = 500
         ):
+
+    HubRepo        = Context.HubRepo
+    HubPullRequest = Context.HubPullRequest
+    GitRepo        = Context.GitRepo
+
     #
     # Default range is a single commit
     #
@@ -313,7 +314,7 @@ def FormatPatch (
     # Format the Messsage-ID:
     #   <webhook-<repo name>-pr<pull>-v<patch series version>-p<patch number>@tianocore.org>
     #
-    ToAddress = '<%s>' % (EmailArchiveAddress)
+    ToAddress = '<%s>' % (Context.webhookconfiguration.EmailArchiveAddress)
     if CommentId:
         FromAddress = '%s via TianoCore Webhook <webhook@tianocore.org>' % (CommentUser)
         HeaderMessageId   = 'Message-ID: <webhook-%s-pull%d-v%d-p%d-c%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, PatchNumber, CommentId)
@@ -346,7 +347,7 @@ def FormatPatch (
 
     #
     # Parse the email message and parse the message body.  Split the message
-    # body at the '\n---\n' marker which seperates the commit message from the
+    # body at the '\n---\n' marker which separates the commit message from the
     # patch diffs.
     #
     Message = email.message_from_bytes(Email.encode('utf8','surrogateescape'))
@@ -377,9 +378,9 @@ def FormatPatch (
         # Get the comments that apply based on the event type
         #
         AllComments = []
-        if event == 'commit_comment':
+        if Context.event == 'commit_comment':
             AllComments = Commit.get_comments()
-        if event == 'pull_request_review_comment':
+        if Context.event == 'pull_request_review_comment':
             AllComments = HubPullRequest.get_review_comments()
         #
         # Only keep the comments that match the CommentPath and CommentPosition
@@ -460,11 +461,7 @@ def FormatPatch (
     return Message.as_string()
 
 def FormatPatchSummary (
-        EmailArchiveAddress,
-        event,
-        GitRepo,
-        HubRepo,
-        HubPullRequest,
+        Context,
         AddressList,
         PatchSeriesVersion,
         CommitRange = None,
@@ -483,6 +480,10 @@ def FormatPatchSummary (
         LargePatchLines = 500
         ):
 
+    HubRepo        = Context.HubRepo
+    HubPullRequest = Context.HubPullRequest
+    GitRepo        = Context.GitRepo
+
     #
     # Default range is the entire pull request
     #
@@ -496,7 +497,7 @@ def FormatPatchSummary (
     # Format the Messsage-ID:
     #   <webhook-<repo name>-pr<pull>-v<patch series version>-p<patch number>@tianocore.org>
     #
-    ToAddress = '<%s>' % (EmailArchiveAddress)
+    ToAddress = '<%s>' % (Context.webhookconfiguration.EmailArchiveAddress)
     if ReviewId:
         FromAddress = '%s via TianoCore Webhook <webhook@tianocore.org>' % (CommentUser)
         if DeleteId:
@@ -594,11 +595,11 @@ def FormatPatchSummary (
     #
     # If this is a comment against the description of the pull request
     # then discard the file change summary and append the review comments
-    # quoting the decription of the pull request and all previous comments.
+    # quoting the description of the pull request and all previous comments.
     # Otherwise, this is a Patch #0 email that includes the file change summary.
     #
     if CommentId or Review:
-        if event in ['pull_request_review_comment', 'pull_request_review'] and ReviewComments:
+        if Context.event in ['pull_request_review_comment', 'pull_request_review'] and ReviewComments:
             if Review:
                 #
                 # Add description of review to email
@@ -649,7 +650,7 @@ def FormatPatchSummary (
             #
             # If this is a pull request review comment then discard the file
             # change summary and insert the review comments at the specified
-            # position in the pull request diff quoting the decription of the
+            # position in the pull request diff quoting the description of the
             # pull request, the diff, and all previous comments.
             #
 
@@ -680,7 +681,7 @@ def FormatPatchSummary (
                 Diff = NewDiff
 
             #
-            # Build dictionary of conversations at line nunbers in Diff
+            # Build dictionary of conversations at line numbers in Diff
             #
             Conversations = {}
             for CommentPath in CommentDict:

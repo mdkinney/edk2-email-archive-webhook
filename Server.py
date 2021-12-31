@@ -21,7 +21,7 @@ from github import Github
 from GetMaintainers import GetMaintainers
 from GetMaintainers import ParseMaintainerAddresses
 from SendEmails import SendEmails
-from FetchPullRequest import FetchPullRequest
+from FetchPullRequest import FetchPullRequest, GitRepositoryLock
 from FetchPullRequest import FormatPatch
 from FetchPullRequest import FormatPatchSummary
 from Models import LogTypeEnum
@@ -32,7 +32,7 @@ SERIES_REVIEWED_BY = '[CodeReview] Series-reviewed-by'
 ACKED_BY           = '[CodeReview] Acked-by'
 TESTED_BY          = '[CodeReview] Tested-by'
 
-def UpdatePullRequestCommitReviewers (Commit, GitHubIdList, eventlog):
+def UpdatePullRequestCommitReviewers (Context, Commit, GitHubIdList):
     # Retrieve all review comments for this commit
     Body = []
     for Comment in Commit.get_comments():
@@ -52,16 +52,16 @@ def UpdatePullRequestCommitReviewers (Commit, GitHubIdList, eventlog):
         # ignored
         Commit.create_comment (''.join(AddReviewers))
         # Add reviewers to the log
-        eventlog.AddLogEntry (LogTypeEnum.Message, 'Commit Reviewers', Message)
+        Context.eventlog.AddLogEntry (LogTypeEnum.Message, 'Commit Reviewers', Message)
     # Return True if reviewers were added to this commit
     return AddReviewers != []
 
-def UpdatePullRequestReviewers (Hub, HubRepo, HubPullRequest, PullRequestGitHubIdList, eventlog):
+def UpdatePullRequestReviewers (Context, PullRequestGitHubIdList):
     Message = ''
     # Get list of collaborators for this repository
-    Collaborators = HubRepo.get_collaborators()
+    Collaborators = Context.HubRepo.get_collaborators()
     # Get list of reviewers already requested for the pull request
-    RequestedReviewers = HubPullRequest.get_review_requests()[0]
+    RequestedReviewers = Context.HubPullRequest.get_review_requests()[0]
     # Determine if any reviewers need to be removed
     RemoveReviewerList = []
     for Reviewer in RequestedReviewers:
@@ -73,7 +73,7 @@ def UpdatePullRequestReviewers (Hub, HubRepo, HubPullRequest, PullRequestGitHubI
             RemoveReviewerList.append(Reviewer.login)
             Message = Message + 'REMOVE REVIEWER  : ' + Reviewer.login + '\n'
             continue
-        if Reviewer == HubPullRequest.user:
+        if Reviewer == Context.HubPullRequest.user:
             # Author of PR can not be reviewer of PR
             # Should never occur
             RemoveReviewerList.append(Reviewer.login)
@@ -88,8 +88,8 @@ def UpdatePullRequestReviewers (Hub, HubRepo, HubPullRequest, PullRequestGitHubI
     # Determine if any reviewers need to be added
     AddReviewerList = []
     for Login in PullRequestGitHubIdList:
-        Reviewer = Hub.get_user(Login)
-        if Reviewer == HubPullRequest.user:
+        Reviewer = Context.Hub.get_user(Login)
+        if Reviewer == Context.HubPullRequest.user:
             # Author of PR can not be reviewer of PR
             Message = Message + 'AUTHOR            : ' + Reviewer.login + '\n'
             continue
@@ -108,12 +108,12 @@ def UpdatePullRequestReviewers (Hub, HubRepo, HubPullRequest, PullRequestGitHubI
     # Update review requests
     if RemoveReviewerList != []:
         # NOTE: This may trigger recursion into this webhook
-        HubPullRequest.delete_review_request (RemoveReviewerList)
+        Context.HubPullRequest.delete_review_request (RemoveReviewerList)
     if AddReviewerList != []:
         # NOTE: This may trigger recursion into this webhook
-        HubPullRequest.create_review_request (AddReviewerList)
+        Context.HubPullRequest.create_review_request (AddReviewerList)
     # Log reviewer updates
-    eventlog.AddLogEntry (LogTypeEnum.Message, 'PR[%d] Update Reviewers' % (HubPullRequest.number), Message)
+    Context.eventlog.AddLogEntry (LogTypeEnum.Message, 'PR[%d] Update Reviewers' % (Context.HubPullRequest.number), Message)
 
 def GetReviewComments(Comment, ReviewComments, CommentIdDict):
     if Comment in ReviewComments:
@@ -147,13 +147,12 @@ def GetReviewCommentsFromReview(Review, CommentId, CommentInReplyToId, CommentId
                 GetReviewComments (Comment, ReviewComments, CommentIdDict)
     return ReviewComments
 
-def AuthenticateGithubRequestHeader(app, webhookconfiguration, eventlog):
+def AuthenticateGithubRequestHeader(Context):
     # Only POST is supported
     if request.method != 'POST':
         abort(501, 'only POST is supported')
-
     # Enforce secret, so not just anybody can trigger these hooks
-    if webhookconfiguration.GithubWebhookSecret:
+    if Context.webhookconfiguration.GithubWebhookSecret:
         # Check for SHA256 signature
         header_signature = request.headers.get('X-Hub-Signature-256')
         if header_signature is None:
@@ -161,14 +160,15 @@ def AuthenticateGithubRequestHeader(app, webhookconfiguration, eventlog):
             header_signature = request.headers.get('X-Hub-Signature')
             if header_signature is None:
                 abort(403, 'No header signature found')
-
         sha_name, signature = header_signature.split('=')
         if sha_name not in ['sha256', 'sha1']:
             abort(501, 'Only SHA256 and SHA1 are supported')
-
         # HMAC requires the key to be bytes, but data is string
-        mac = hmac.new(bytes(webhookconfiguration.GithubWebhookSecret, 'utf-8'), msg=request.get_data(), digestmod=sha_name)
-
+        mac = hmac.new(
+                  bytes(Context.webhookconfiguration.GithubWebhookSecret, 'utf-8'),
+                  msg=request.get_data(),
+                  digestmod=sha_name
+                  )
         # Python does not have hmac.compare_digest prior to 2.7.7
         if sys.hexversion >= 0x020707F0:
             if not hmac.compare_digest(str(mac.hexdigest()), str(signature)):
@@ -179,17 +179,21 @@ def AuthenticateGithubRequestHeader(app, webhookconfiguration, eventlog):
             # application
             if not str(mac.hexdigest()) == str(signature):
                 abort(403, 'hmac compare digest failed')
+    # Update Context structure with event from the request header.
+    # Default is a 'ping' event
+    Context.event = request.headers.get('X-GitHub-Event', 'ping')
     # Add request headers to the log
     # Delayed to this point to prevent logging rejected requests
-    eventlog.AddLogEntry (LogTypeEnum.Request, request.headers.get('X-GitHub-Event', 'ping'), str(request.headers))
+    Context.eventlog.AddLogEntry (LogTypeEnum.Request, Context.event, str(request.headers))
 
-def VerifyPayload(event, eventlog, webhookconfiguration):
+def VerifyPayload(Context):
     # If event is ping, then generate a pong response
-    if event == 'ping':
-        return None, None, 200, 'pong'
+    if Context.event == 'ping':
+        return 200, 'pong'
     # If event is meta, then generate a meta response
-    if event == 'meta':
-        return None, None, 200, 'meta'
+    if Context.event == 'meta':
+        Context.Message = 'meta'
+        return 200, 'meta'
     # Parse request payload as json
     try:
         payload = request.get_json()
@@ -197,85 +201,93 @@ def VerifyPayload(event, eventlog, webhookconfiguration):
         abort(400, 'Request parsing failed')
     # Add payload to the log
     if 'action' in payload:
-        eventlog.AddLogEntry (LogTypeEnum.Payload, payload['action'], dumps(payload, indent=2))
+        Context.eventlog.AddLogEntry (LogTypeEnum.Payload, payload['action'], dumps(payload, indent=2))
     else:
         # Skip payload that does not provide an action
-        eventlog.AddLogEntry (LogTypeEnum.Payload, 'None', dumps(payload, indent=2))
-        return None, None, 200, 'ignore event %s with no action' % (event)
+        Context.eventlog.AddLogEntry (LogTypeEnum.Payload, 'None', dumps(payload, indent=2))
+        return 200, 'ignore event %s with no action' % (Context.event)
     # Ignore push and create events
-    if event in ['push', 'create']:
-        return None, None, 200,'ignore event %s' % (event)
+    if Context.event in ['push', 'create']:
+        return 200,'ignore event %s' % (Context.event)
     # Skip payload that does not provide a repository
     if 'repository' not in payload:
-        return None, None, 200, 'ignore event %s with no repository' % (event)
+        return 200, 'ignore event %s with no repository' % (Context.event)
     # Skip payload that does not provide a repository full name
     if 'full_name' not in payload['repository']:
-        return None, None, 200, 'ignore event %s with no repository full name' % (event)
+        return 200, 'ignore event %s with no repository full name' % (Context.event)
     # Skip requests that are not for the configured repository
-    if payload['repository']['full_name'] != webhookconfiguration.GithubOrgName + '/' + webhookconfiguration.GithubRepoName:
-        return None, None, 200, 'ignore event %s for incorrect repository %s' % (event, payload['repository']['full_name'])
+    if payload['repository']['full_name'] != Context.webhookconfiguration.GithubOrgName + '/' + Context.webhookconfiguration.GithubRepoName:
+        return 200, 'ignore event %s for incorrect repository %s' % (Context.event, payload['repository']['full_name'])
     # Retrieve Hub object for this repo
     try:
-        Hub = Github (webhookconfiguration.GithubToken)
+        Context.Hub = Github (Context.webhookconfiguration.GithubToken)
     except:
         abort(400, 'Unable to retrieve Hub object using GITHUB_TOKEN')
-    return payload, Hub, 0, ''
+    # Update Context structure
+    Context.action  = payload['action']
+    Context.payload = payload
+    return 0, ''
 
-def VerifyPullRequest(event, action, payload, Hub, Issue, eventlog):
+def VerifyPullRequest(Context, Issue = None):
     # Use GitHub API to get the Repo and Pull Request objects
     HubRepo        = None
     HubPullRequest = None
     try:
-        if Hub:
-            HubRepo = Hub.get_repo(payload['repository']['full_name'])
-            if 'pull_request' in payload:
-                HubPullRequest = HubRepo.get_pull(payload['pull_request']['number'])
-            elif 'issue' in payload:
-                HubPullRequest = HubRepo.get_pull(payload['issue']['number'])
-        elif Issue:
+        if Issue:
             # Skip Issue with same commit SHA that is for a different repository
-            if Issue.repository.full_name != payload['repository']['full_name']:
-                return None, None, None, None, 200, 'ignore %s event for a different repository %s' % (event, Issue.repository.full_name)
+            if Issue.repository.full_name != Context.payload['repository']['full_name']:
+                return 200, 'ignore %s event for a different repository %s' % (Context.event, Issue.repository.full_name)
             HubRepo = Issue.repository
             HubPullRequest = Issue.as_pull_request()
+        elif Context.Hub:
+            HubRepo = Context.Hub.get_repo(Context.payload['repository']['full_name'])
+            if 'pull_request' in Context.payload:
+                HubPullRequest = HubRepo.get_pull(Context.payload['pull_request']['number'])
+            elif 'issue' in Context.payload:
+                HubPullRequest = HubRepo.get_pull(Context.payload['issue']['number'])
     except:
         pass
     if not HubRepo or not HubPullRequest:
         # Skip requests if the PyGitHub objects can not be retrieved
-        return None, None, None, None, 200, 'ignore %s event for which the GitHub objects can not be retrieved' % (event)
+        return 200, 'ignore %s event for which the GitHub objects can not be retrieved' % (Context.event)
     # Skip pull request that is a draft
     if HubPullRequest.draft:
-        return None, None, None, None, 200, 'ignore %s event against a draft pull request' % (event)
+        return 200, 'ignore %s event against a draft pull request' % (Context.event)
     # Skip pull request that is not open unless the pull request is being closed
-    if event != 'pull_request' or action != 'closed':
+    if Context.event != 'pull_request' or Context.action != 'closed':
         if HubPullRequest.state != 'open':
-            return None, None, None, None, 200, 'ignore %s event against a pull request with state %s that is not open' % (event, HubPullRequest.state)
+            return 200, 'ignore %s event against a pull request with state %s that is not open' % (Context.event, HubPullRequest.state)
     # Skip pull request with a base repo that is different than the expected repo
     if HubPullRequest.base.repo.full_name != HubRepo.full_name:
-        return None, None, None, None, 200, 'ignore %s event against unexpected repo %s' % (event, HubPullRequest.base.repo.full_name)
+        return 200, 'ignore %s event against unexpected repo %s' % (Context.event, HubPullRequest.base.repo.full_name)
     # Skip pull requests with a base branch that is not protected or the default branch
     Branch = HubRepo.get_branch(HubPullRequest.base.ref)
     if not Branch or not Branch.protected:
         if HubPullRequest.base.ref != HubRepo.default_branch:
-            return None, None, None, None, 200, 'ignore %s event against base branch %s that is not protected or the default branch' % (event, HubPullRequest.base.ref)
+            return 200, 'ignore %s event against base branch %s that is not protected or the default branch' % (Context.event, HubPullRequest.base.ref)
     # Fetch the git commits for the pull request and return a git repo
     # object and the contents of Maintainers.txt
-    GitRepo, Maintainers = FetchPullRequest (HubPullRequest, eventlog)
+    GitRepo, Maintainers = FetchPullRequest (HubPullRequest, Context.eventlog)
     if GitRepo is None or Maintainers is None:
-        return None, None, None, None, 200, 'ignore %s event for a PR that can not be fetched' % (event)
-    return HubRepo, HubPullRequest, GitRepo, Maintainers, 0, ''
+        return 200, 'ignore %s event for a PR that can not be fetched' % (Context.event)
+    # Update context structure
+    Context.HubRepo        = HubRepo
+    Context.HubPullRequest = HubPullRequest
+    Context.GitRepo        = GitRepo
+    Context.Maintainers    = Maintainers
+    return 0, ''
 
-def GetPatchSeriesInformation(event, action, HubPullRequest):
+def GetPatchSeriesInformation(Context):
     NewPatchSeries = False
     PatchSeriesVersion = 1;
-    if event == 'pull_request' and action in ['opened', 'reopened', 'ready_for_review']:
+    if Context.event == 'pull_request' and Context.action in ['opened', 'reopened', 'ready_for_review']:
         # New pull request was created
         NewPatchSeries = True
-    if event != 'pull_request' or action in ['synchronize', 'edited', 'closed', 'reopened', 'ready_for_review']:
+    if Context.event != 'pull_request' or Context.action in ['synchronize', 'edited', 'closed', 'reopened', 'ready_for_review']:
         # Existing pull request was updated.
         # Commits were added to an existing pull request or an existing pull
         # request was forced push. Get events to determine what happened
-        for Event in HubPullRequest.get_issue_events():
+        for Event in Context.HubPullRequest.get_issue_events():
             # Count head_ref_force_pushed and reopened events to determine
             # the version of the patch series.
             if Event.event in ['head_ref_force_pushed', 'reopened']:
@@ -285,96 +297,88 @@ def GetPatchSeriesInformation(event, action, HubPullRequest):
                 # same date/time (or within 2 seconds) that the pull request
                 # was updated, then this was a forced push and the entire
                 # patch series should be emailed again.
-                if abs(Event.created_at - HubPullRequest.updated_at).seconds <= 2:
+                if abs(Event.created_at - Context.HubPullRequest.updated_at).seconds <= 2:
                     NewPatchSeries = True
     return NewPatchSeries, PatchSeriesVersion
 
-def ProcessIssueComment(event, action, payload, Hub, app, webhookconfiguration, eventlog):
+def ProcessIssueComment(Context):
     # Verify the pull request referenced in the payload
-    HubRepo, HubPullRequest, GitRepo, Maintainers, Status, Message = VerifyPullRequest(event, action, payload, Hub, None, eventlog)
+    Status, Message = VerifyPullRequest(Context)
     if Status:
         return Status, Message
     # Determine if this is a new patch series and the version of the patch series
-    NewPatchSeries, PatchSeriesVersion = GetPatchSeriesInformation(event, action, HubPullRequest)
+    NewPatchSeries, PatchSeriesVersion = GetPatchSeriesInformation(Context)
     # Build list of commit SHA values and list of all maintainers/reviewers
     CommitShaList = []
     PullRequestAddressList = []
-    for Commit in HubPullRequest.get_commits():
+    for Commit in Context.HubPullRequest.get_commits():
         CommitShaList.append(Commit.sha)
         # Get list of files modified by commit from GIT repository
-        CommitFiles = GitRepo.commit(Commit.sha).stats.files
+        CommitFiles = Context.GitRepo.commit(Commit.sha).stats.files
         # Get maintainers and reviewers for all files in this commit
-        Addresses = GetMaintainers (Maintainers, CommitFiles)
+        Addresses = GetMaintainers (Context.Maintainers, CommitFiles)
         AddressList, GitHubIdList, EmailList = ParseMaintainerAddresses(Addresses)
         PullRequestAddressList = list(set(PullRequestAddressList + AddressList))
     # Generate the summary email patch #0 with body of email prefixed with >.
     UpdateDeltaTime = 0
-    if action == 'edited':
+    if Context.action == 'edited':
         # The delta time is the number of seconds from the time the comment
         # was created to the time the comment was edited
-        UpdatedAt = datetime.datetime.strptime(payload['comment']['updated_at'], "%Y-%m-%dT%H:%M:%SZ")
-        CreatedAt = datetime.datetime.strptime(payload['comment']['created_at'], "%Y-%m-%dT%H:%M:%SZ")
+        UpdatedAt = datetime.datetime.strptime(Context.payload['comment']['updated_at'], "%Y-%m-%dT%H:%M:%SZ")
+        CreatedAt = datetime.datetime.strptime(Context.payload['comment']['created_at'], "%Y-%m-%dT%H:%M:%SZ")
         UpdateDeltaTime = (UpdatedAt - CreatedAt).seconds
-    if action == 'deleted':
+    if Context.action == 'deleted':
         UpdateDeltaTime = -1
     Summary = FormatPatchSummary (
-                webhookconfiguration.EmailArchiveAddress,
-                event,
-                GitRepo,
-                HubRepo,
-                HubPullRequest,
+                Context,
                 PullRequestAddressList,
                 PatchSeriesVersion,
                 CommitRange = CommitShaList[0] + '..' + CommitShaList[-1],
-                CommentUser = payload['comment']['user']['login'],
-                CommentId = payload['comment']['id'],
+                CommentUser = Context.payload['comment']['user']['login'],
+                CommentId = Context.payload['comment']['id'],
                 CommentPosition = None,
                 CommentPath = None,
                 Prefix = '> ',
                 UpdateDeltaTime = UpdateDeltaTime
                 )
     # Send generated emails
-    SendEmails (HubPullRequest, [Summary], app, webhookconfiguration, eventlog)
-    return 200, 'successfully processed %s event with action %s' % (event, payload['action'])
+    SendEmails (Context, [Summary])
+    return 200, 'successfully processed %s event with action %s' % (Context.event, Context.action)
 
-def ProcessCommitComment(event, action, payload, Hub, app, webhookconfiguration, eventlog):
+def ProcessCommitComment(Context):
     # Search for issues/pull requests that contain the comment's commit_id
-    CommitId        = payload['comment']['commit_id']
-    CommentId       = payload['comment']['id']
-    CommentPosition = payload['comment']['position']
-    CommentPath     = payload['comment']['path']
+    CommitId        = Context.payload['comment']['commit_id']
+    CommentId       = Context.payload['comment']['id']
+    CommentPosition = Context.payload['comment']['position']
+    CommentPath     = Context.payload['comment']['path']
     EmailContents   = []
-    for Issue in Hub.search_issues('SHA:' + CommitId):
+    for Issue in Context.Hub.search_issues('SHA:' + CommitId):
         # Verify pull request referenced in Issue
-        HubRepo, HubPullRequest, GitRepo, Maintainers, Status, Message = VerifyPullRequest(event, action, payload, None, Issue, eventlog)
+        Status, Message = VerifyPullRequest(Context, Issue)
         if Status:
-            eventlog.AddLogEntry (LogTypeEnum.Message, 'PR[%d]' % (Issue.id), Message)
+            Context.eventlog.AddLogEntry (LogTypeEnum.Message, 'PR[%d]' % (Issue.id), Message)
             continue
         # Determine if this is a new patch series and the version of the patch series
-        NewPatchSeries, PatchSeriesVersion = GetPatchSeriesInformation(event, action, HubPullRequest)
+        NewPatchSeries, PatchSeriesVersion = (Context)
         # Determine the patch number of the commit with the comment
         PatchNumber = 0
-        for Commit in HubPullRequest.get_commits():
+        for Commit in Context.HubPullRequest.get_commits():
             PatchNumber = PatchNumber + 1
             if Commit.sha == CommitId:
                 break
         # Get commit from GIT repository
-        CommitFiles = GitRepo.commit(Commit.sha).stats.files
+        CommitFiles = Context.GitRepo.commit(Commit.sha).stats.files
         # Get maintainers and reviewers for all files in this commit
-        Addresses = GetMaintainers (Maintainers, CommitFiles)
+        Addresses = GetMaintainers (Context.Maintainers, CommitFiles)
         AddressList, GitHubIdList, EmailList = ParseMaintainerAddresses(Addresses)
 
         Email = FormatPatch (
-                    webhookconfiguration.EmailArchiveAddress,
-                    event,
-                    GitRepo,
-                    HubRepo,
-                    HubPullRequest,
+                    Context,
                     Commit,
                     AddressList,
                     PatchSeriesVersion,
                     PatchNumber,
-                    CommentUser = payload['comment']['user']['login'],
+                    CommentUser = Context.payload['comment']['user']['login'],
                     CommentId = CommentId,
                     CommentPosition = CommentPosition,
                     CommentPath = CommentPath,
@@ -383,19 +387,19 @@ def ProcessCommitComment(event, action, payload, Hub, app, webhookconfiguration,
         EmailContents.append (Email)
 
     if EmailContents == []:
-        return 200, 'ignore %s event with action %s for which there are no matching issues' % (event, action)
+        return 200, 'ignore %s event with action %s for which there are no matching issues' % (Context.event, Context.action)
     # Send generated emails
-    SendEmails (HubPullRequest, EmailContents, app, webhookconfiguration, eventlog)
-    return 200, 'successfully processed %s event with action %s' % (event, action)
+    SendEmails (Context, EmailContents)
+    return 200, 'successfully processed %s event with action %s' % (Context.event, Context.action)
 
-def ProcessPullRequestReview(event, action, payload, Hub, app, webhookconfiguration, eventlog):
+def ProcessPullRequestReview(Context):
     # Verify the pull request referenced in the payload
-    HubRepo, HubPullRequest, GitRepo, Maintainers, Status, Message = VerifyPullRequest(event, action, payload, Hub, None, eventlog)
+    Status, Message = VerifyPullRequest(Context)
     if Status:
         return Status, Message
     # Build dictionary of review comments
     CommentIdDict = {}
-    for Comment in HubPullRequest.get_review_comments():
+    for Comment in Context.HubPullRequest.get_review_comments():
         Comment.pull_request_review_id = None
         if 'pull_request_review_id' in Comment.raw_data:
             Comment.pull_request_review_id = Comment.raw_data['pull_request_review_id']
@@ -407,20 +411,20 @@ def ProcessPullRequestReview(event, action, payload, Hub, app, webhookconfigurat
     DeleteId = None
     ParentReviewId = None
     UpdateDeltaTime = 0
-    if event in ['pull_request_review']:
-        CommitId           = payload['review']['commit_id']
-        CommentUser        = payload['review']['user']['login'],
+    if Context.event in ['pull_request_review']:
+        CommitId           = Context.payload['review']['commit_id']
+        CommentUser        = Context.payload['review']['user']['login'],
         CommentId          = None
         CommentPosition    = None
         CommentPath        = None
         CommentInReplyToId = None
-        ReviewId           = payload['review']['id']
+        ReviewId           = Context.payload['review']['id']
         try:
-            Review = HubPullRequest.get_review(ReviewId)
+            Review = Context.HubPullRequest.get_review(ReviewId)
         except:
             Review = None
         ReviewComments = GetReviewCommentsFromReview(Review, CommentId, CommentInReplyToId, CommentIdDict)
-        if action == 'submitted':
+        if Context.action == 'submitted':
             UpdateDeltaTime = 0
             for ReviewComment in ReviewComments:
                 if ReviewComment.pull_request_review_id == ReviewId:
@@ -428,53 +432,49 @@ def ProcessPullRequestReview(event, action, payload, Hub, app, webhookconfigurat
                         ParentReviewId = CommentIdDict[ReviewComment.in_reply_to_id].pull_request_review_id
                         if ParentReviewId and ParentReviewId != ReviewId:
                             break
-        if action == 'edited' and Review:
-            UpdatedAt = datetime.datetime.strptime(payload['pull_request']['updated_at'], "%Y-%m-%dT%H:%M:%SZ")
+        if Context.action == 'edited' and Review:
+            UpdatedAt = datetime.datetime.strptime(Context.payload['pull_request']['updated_at'], "%Y-%m-%dT%H:%M:%SZ")
             UpdateDeltaTime = (UpdatedAt - Review.submitted_at).seconds
-    if event in ['pull_request_review_comment']:
-        CommitId           = payload['comment']['commit_id']
-        CommentId          = payload['comment']['id']
-        CommentUser        = payload['comment']['user']['login'],
-        CommentPosition    = payload['comment']['position']
-        CommentPath        = payload['comment']['path']
+    if Context.event in ['pull_request_review_comment']:
+        CommitId           = Context.payload['comment']['commit_id']
+        CommentId          = Context.payload['comment']['id']
+        CommentUser        = Context.payload['comment']['user']['login'],
+        CommentPosition    = Context.payload['comment']['position']
+        CommentPath        = Context.payload['comment']['path']
         CommentInReplyToId = None
         ReviewId           = None
-        if 'in_reply_to_id' in payload['comment']:
-            CommentInReplyToId = payload['comment']['in_reply_to_id']
-        if 'pull_request_review_id' in payload['comment']:
-            ReviewId = payload['comment']['pull_request_review_id']
+        if 'in_reply_to_id' in Context.payload['comment']:
+            CommentInReplyToId = Context.payload['comment']['in_reply_to_id']
+        if 'pull_request_review_id' in Context.payload['comment']:
+            ReviewId = Context.payload['comment']['pull_request_review_id']
             try:
-                Review = HubPullRequest.get_review(ReviewId)
+                Review = Context.HubPullRequest.get_review(ReviewId)
             except:
                 Review = None
         ReviewComments = GetReviewCommentsFromReview(Review, CommentId, CommentInReplyToId, CommentIdDict)
-        if action == 'deleted':
+        if Context.action == 'deleted':
             UpdateDeltaTime = 0
-            DeleteId = payload['comment']['id']
-        if action == 'edited' and Review:
-            UpdatedAt = datetime.datetime.strptime(payload['comment']['updated_at'], "%Y-%m-%dT%H:%M:%SZ")
+            DeleteId = Context.payload['comment']['id']
+        if Context.action == 'edited' and Review:
+            UpdatedAt = datetime.datetime.strptime(Context.payload['comment']['updated_at'], "%Y-%m-%dT%H:%M:%SZ")
             UpdateDeltaTime = (UpdatedAt - Review.submitted_at).seconds
     # Determine if this is a new patch series and the version of the patch series
-    NewPatchSeries, PatchSeriesVersion = GetPatchSeriesInformation(event, action, HubPullRequest)
+    NewPatchSeries, PatchSeriesVersion = GetPatchSeriesInformation(Context)
     # All pull request review comments are against patch #0
     PatchNumber = 0
     # Build dictionary of files in range of commits from the pull request
     # base sha up to the commit id of the pull request review comment.
     CommitFiles = {}
     CommitShaList = []
-    for Commit in HubPullRequest.get_commits():
+    for Commit in Context.HubPullRequest.get_commits():
         CommitShaList.append (Commit.sha)
-        CommitFiles.update (GitRepo.commit(Commit.sha).stats.files)
+        CommitFiles.update (Context.GitRepo.commit(Commit.sha).stats.files)
     # Get maintainers and reviewers for all files in this commit
-    Addresses = GetMaintainers (Maintainers, CommitFiles)
+    Addresses = GetMaintainers (Context.Maintainers, CommitFiles)
     AddressList, GitHubIdList, EmailList = ParseMaintainerAddresses(Addresses)
     # Generate the summary email patch #0 with body of email prefixed with >.
     Email = FormatPatchSummary (
-                webhookconfiguration.EmailArchiveAddress,
-                event,
-                GitRepo,
-                HubRepo,
-                HubPullRequest,
+                Context,
                 AddressList,
                 PatchSeriesVersion,
                 CommitRange = CommitShaList[0] + '..' + CommitShaList[-1],
@@ -492,46 +492,42 @@ def ProcessPullRequestReview(event, action, payload, Hub, app, webhookconfigurat
                 ParentReviewId = ParentReviewId
                 )
     # Send any generated emails
-    SendEmails (HubPullRequest, [Email], app, webhookconfiguration, eventlog)
-    return 200, 'successfully processed %s event with action %s' % (event, action)
+    SendEmails (Context, [Email])
+    return 200, 'successfully processed %s event with action %s' % (Context.event, Context.action)
 
-def ProcessPullRequest(event, action, payload, Hub, app, webhookconfiguration, eventlog):
+def ProcessPullRequest(Context):
     # Verify the pull request referenced in the payload
-    HubRepo, HubPullRequest, GitRepo, Maintainers, Status, Message = VerifyPullRequest(event, action, payload, Hub, None, eventlog)
+    Status, Message = VerifyPullRequest(Context)
     if Status:
         return Status, Message
     # Determine if this is a new patch series and the version of the patch series
-    NewPatchSeries, PatchSeriesVersion = GetPatchSeriesInformation(event, action, HubPullRequest)
+    NewPatchSeries, PatchSeriesVersion = GetPatchSeriesInformation(Context)
 
     PullRequestAddressList = []
     PullRequestGitHubIdList = []
     PullRequestEmailList = []
     EmailContents = []
     PatchNumber = 0
-    for Commit in HubPullRequest.get_commits():
+    for Commit in Context.HubPullRequest.get_commits():
         PatchNumber = PatchNumber + 1
         # Get list of files modified by commit from GIT repository
-        CommitFiles = GitRepo.commit(Commit.sha).stats.files
+        CommitFiles = Context.GitRepo.commit(Commit.sha).stats.files
         # Get maintainers and reviewers for all files in this commit
-        Addresses = GetMaintainers (Maintainers, CommitFiles)
+        Addresses = GetMaintainers (Context.Maintainers, CommitFiles)
         AddressList, GitHubIdList, EmailList = ParseMaintainerAddresses(Addresses)
         PullRequestAddressList  = list(set(PullRequestAddressList  + AddressList))
         PullRequestGitHubIdList = list(set(PullRequestGitHubIdList + GitHubIdList))
         PullRequestEmailList    = list(set(PullRequestEmailList    + EmailList))
-        if action in ['opened', 'synchronize', 'reopened', 'ready_for_review']:
+        if Context.action in ['opened', 'synchronize', 'reopened', 'ready_for_review']:
             # Update the list of required reviewers for this commit
-            ReviewersUpdated = UpdatePullRequestCommitReviewers (Commit, GitHubIdList, eventlog)
+            ReviewersUpdated = UpdatePullRequestCommitReviewers (Context, Commit, GitHubIdList)
             # Generate email contents for all commits in a pull request if this is
             # a new pull request or a forced push was done to an existing pull request.
             # Generate email contents for patches that add new reviewers. This
             # occurs when when new commits are added to an existing pull request.
             if NewPatchSeries or ReviewersUpdated:
                 Email = FormatPatch (
-                            webhookconfiguration.EmailArchiveAddress,
-                            event,
-                            GitRepo,
-                            HubRepo,
-                            HubPullRequest,
+                            Context,
                             Commit,
                             AddressList,
                             PatchSeriesVersion,
@@ -539,108 +535,94 @@ def ProcessPullRequest(event, action, payload, Hub, app, webhookconfiguration, e
                             )
                 EmailContents.append (Email)
 
-    if action in ['opened', 'synchronize', 'reopened', 'ready_for_review']:
+    if Context.action in ['opened', 'synchronize', 'reopened', 'ready_for_review']:
         # Update the list of required reviewers for the pull request
-        UpdatePullRequestReviewers (Hub, HubRepo, HubPullRequest, PullRequestGitHubIdList, eventlog)
+        UpdatePullRequestReviewers (Context, PullRequestGitHubIdList)
 
     # If this is a new pull request or a forced push on a pull request or an
     # edit of the pull request title or description, then generate the
     # summary email patch #0 and add to be beginning of the list of emails
     # to send.
-    if NewPatchSeries or action in ['edited', 'closed']:
+    if NewPatchSeries or Context.action in ['edited', 'closed']:
         UpdateDeltaTime = 0
-        if action in ['edited', 'closed']:
-            UpdateDeltaTime = (HubPullRequest.updated_at - HubPullRequest.created_at).seconds
+        if Context.action in ['edited', 'closed']:
+            UpdateDeltaTime = (Context.HubPullRequest.updated_at - Context.HubPullRequest.created_at).seconds
         Summary = FormatPatchSummary (
-                        webhookconfiguration.EmailArchiveAddress,
-                        event,
-                        GitRepo,
-                        HubRepo,
-                        HubPullRequest,
-                        PullRequestAddressList,
-                        PatchSeriesVersion,
-                        UpdateDeltaTime = UpdateDeltaTime
-                        )
+                      Context,
+                      PullRequestAddressList,
+                      PatchSeriesVersion,
+                      UpdateDeltaTime = UpdateDeltaTime
+                      )
         EmailContents.insert (0, Summary)
     # Send generated emails
-    SendEmails (HubPullRequest, EmailContents, app, webhookconfiguration, eventlog)
-    return 200, 'successfully processed %s event with action %s' % (event, action)
+    SendEmails (Context, EmailContents)
+    return 200, 'successfully processed %s event with action %s' % (Context.event, Context.action)
 
-def ProcessGithubRequest(app, webhookconfiguration, eventlog):
+def ProcessGithubRequest(Context):
     #
     # Authenticate the request header.
     #
-    AuthenticateGithubRequestHeader(app, webhookconfiguration, eventlog)
-
-    #
-    # Retrieve Github event from the request header. Default is a 'ping' event
-    #
-    event = request.headers.get('X-GitHub-Event', 'ping')
+    AuthenticateGithubRequestHeader(Context)
 
     #
     # Parse and verify the GitHub payload is for this webhook
     #
-    payload, Hub, Status, Message = VerifyPayload(event, eventlog, webhookconfiguration)
+    Status, Message = VerifyPayload(Context)
     if Status:
         return Status, Message
-
-    #
-    # Retrieve GitHub action from payload.
-    #
-    action = payload['action']
 
     # Process issue comment events
     # These are comments against the entire pull request
     # Quote Patch #0 Body and add comment below below with commenters GitHubID
-    if event == 'issue_comment':
-        if action not in ['created', 'edited', 'deleted']:
-            return 200, 'ignore %s event with action %s. Only created, edited, and deleted are supported.' % (event, action)
-        if 'pull_request' not in payload['issue']:
-            return 200, 'ignore %s event without an associated pull request' % (event)
-        return ProcessIssueComment(event, action, payload, Hub, app, webhookconfiguration, eventlog)
+    if Context.event == 'issue_comment':
+        if Context.action not in ['created', 'edited', 'deleted']:
+            return 200, 'ignore %s event with action %s. Only created, edited, and deleted are supported.' % (Context.event, Context.action)
+        if 'pull_request' not in Context.payload['issue']:
+            return 200, 'ignore %s event without an associated pull request' % (Context.event)
+        return ProcessIssueComment(Context)
 
     # Process commit comment events
     # These are comments against a specific commit
     # Quote Patch #n commit message and add comment below below with commenters GitHubID
-    if event == 'commit_comment':
-        if action not in ['created', 'edited']:
-            return 200, 'ignore %s event with action %s. Only created and edited are supported.' % (event, action)
+    if Context.event == 'commit_comment':
+        if Context.action not in ['created', 'edited']:
+            return 200, 'ignore %s event with action %s. Only created and edited are supported.' % (Context.event, Context.action)
         # Skip REVIEW_REQUEST comments made by the webhook itself. This same
         # information is always present in the patch emails, so filtering these
         # comments prevents double emails when a pull request is opened or
         # synchronized.
-        for Line in payload['comment']['body'].splitlines():
+        for Line in Context.payload['comment']['body'].splitlines():
             if Line.startswith (REVIEW_REQUEST):
-                return 200, 'ignore %s event with REVIEW_REQUEST body generated by this webhook' % (event)
-        return ProcessCommitComment(event, action, payload, Hub, app, webhookconfiguration, eventlog)
+                return 200, 'ignore %s event with REVIEW_REQUEST body generated by this webhook' % (Context.event)
+        return ProcessCommitComment(Context)
 
     # Process pull_request_review events
     # Quote Patch #0 commit message and patch diff of file comment is against
-    if event == 'pull_request_review':
-        if action not in ['submitted', 'edited']:
-            return 200, 'ignore %s event with action %s. Only submitted and deleted are supported.' % (event, action)
-        if action == 'edited' and payload['changes'] == {}:
-            return 200, 'ignore %s event with action %s that has no changes.' % (event, action)
-        return ProcessPullRequestReview(event, action, payload, Hub, app, webhookconfiguration, eventlog)
+    if Context.event == 'pull_request_review':
+        if Context.action not in ['submitted', 'edited']:
+            return 200, 'ignore %s event with action %s. Only submitted and deleted are supported.' % (Context.event, Context.action)
+        if Context.action == 'edited' and Context.payload['changes'] == {}:
+            return 200, 'ignore %s event with action %s that has no changes.' % (Context.event, Context.action)
+        return ProcessPullRequestReview(Context)
 
     # Process pull_request_review_comment events
     # Quote Patch #0 commit message and patch diff of file comment is against
-    if event == 'pull_request_review_comment':
-        if action not in ['edited', 'deleted']:
-            return 200, 'ignore %s event with action %s. Only edited and deleted are supported.' % (event, action)
+    if Context.event == 'pull_request_review_comment':
+        if Context.action not in ['edited', 'deleted']:
+            return 200, 'ignore %s event with action %s. Only edited and deleted are supported.' % (Context.event, Context.action)
         # Skip REVIEW_REQUEST comments made by the webhook itself. This same
         # information is always present in the patch emails, so filtering these
         # comments prevents double emails when a pull request is opened or
         # synchronized.
-        for Line in payload['comment']['body'].splitlines():
+        for Line in Context.payload['comment']['body'].splitlines():
             if Line.startswith (REVIEW_REQUEST):
-                return 200, 'ignore %s event with REVIEW_REQUEST body generated by this webhook' % (event)
-        return ProcessPullRequestReview(event, action, payload, Hub, app, webhookconfiguration, eventlog)
+                return 200, 'ignore %s event with REVIEW_REQUEST body generated by this webhook' % (Context.event)
+        return ProcessPullRequestReview(Context.event)
 
     # Process pull request events
-    if event == 'pull_request':
-        if action not in ['opened', 'synchronize', 'edited', 'closed', 'reopened', 'ready_for_review']:
-            return 200, 'ignore %s event with action %s. Only opened, synchronize, edited, closed, reopened, and ready_for_review are supported.' % (event, action)
-        return ProcessPullRequest(event, action, payload, Hub, app, webhookconfiguration, eventlog)
+    if Context.event == 'pull_request':
+        if Context.action not in ['opened', 'synchronize', 'edited', 'closed', 'reopened', 'ready_for_review']:
+            return 200, 'ignore %s event with action %s. Only opened, synchronize, edited, closed, reopened, and ready_for_review are supported.' % (Context.event, Context.action)
+        return ProcessPullRequest(Context)
 
-    return 200, 'ignore unsupported event %s with action %s' % (event, action)
+    return 200, 'ignore unsupported event %s with action %s' % (Context.event, Context.action)
