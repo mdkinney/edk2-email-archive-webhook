@@ -68,6 +68,24 @@ and code review activities.
 
 * Implement unit tests
 
+* Add WebhookContext object class with context for processing request.
+  + app
+  + webhookconfiguration
+  + eventlog
+  + event
+  + action
+  + payload
+  + Hub
+  + GitRepo
+  + HubRepo
+  + HubPullRequest
+  + Maintainers
+  + Status (default 200)
+  + Message (json message to return in response)
+
+* Logs - Show list of events. Hyperlink to list of logs for that event
+  Event should provide date/time/event/action.
+
 * Update lock around git operations to support a different lock for each repo.
   And use of lock around all git operations.  Consider returning list of files
   modified and set of formatted patches from the Fetch() method.
@@ -76,15 +94,6 @@ and code review activities.
 
 * Add test case with the same commits in more than one open PR.  Commit_comments
   should generate emails against all PRs with that same commit.
-
-* Need to make sure draft PRs are ignored.
-
-* The current behavior only supports 1 target branch:
-    #
-    # Skip pull requests with a base branch that is not the default branch
-    #
-  Need to extend to support multiple target branches so code reviews against
-  release branches can be supported too.
 
 * Clean up SQLAlchemy database so deleted logs reduce file size.
 
@@ -118,6 +127,19 @@ and code review activities.
   same result.
 
 ## Completed Tasks
+
+* DONE 12-30-2121 - Ignore draft PRs and add case for read_for_review and
+  treat the same as reopened.
+
+* DONE 12-30-2021 - Update checks to only generate emails of code review if
+  the target branch is protected or it is the default branch
+
+  The current behavior only supports 1 target branch:
+    #
+    # Skip pull requests with a base branch that is not the default branch
+    #
+  Need to extend to support multiple target branches so code reviews against
+  release branches can be supported too.
 
 * DONE 12-29-2021 - Add all requests, responses, git commands, and emails to logs.
 

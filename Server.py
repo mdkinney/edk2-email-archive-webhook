@@ -221,32 +221,43 @@ def VerifyPayload(event, eventlog, webhookconfiguration):
         abort(400, 'Unable to retrieve Hub object using GITHUB_TOKEN')
     return payload, Hub, 0, ''
 
-def VerifyPullRequest(event, action, payload, HubOrIssue, eventlog):
+def VerifyPullRequest(event, action, payload, Hub, Issue, eventlog):
     # Use GitHub API to get the Repo and Pull Request objects
+    HubRepo        = None
+    HubPullRequest = None
     try:
-        # First try as a Hub object, then as an Issue object
-        try:
-            HubRepo = HubOrIssue.get_repo(payload['repository']['full_name'])
-            HubPullRequest = HubRepo.get_pull(payload['issue']['number'])
-        except:
+        if Hub:
+            HubRepo = Hub.get_repo(payload['repository']['full_name'])
+            if 'pull_request' in payload:
+                HubPullRequest = HubRepo.get_pull(payload['pull_request']['number'])
+            elif 'issue' in payload:
+                HubPullRequest = HubRepo.get_pull(payload['issue']['number'])
+        elif Issue:
             # Skip Issue with same commit SHA that is for a different repository
-            if HubOrIssue.repository.full_name != payload['repository']['full_name']:
-                return None, None, None, None, 200, 'ignore %s event for a different repository %s' % (event, HubOrIssue.repository.full_name)
-            HubRepo = HubOrIssue.repository
-            HubPullRequest = HubOrIssue.as_pull_request()
+            if Issue.repository.full_name != payload['repository']['full_name']:
+                return None, None, None, None, 200, 'ignore %s event for a different repository %s' % (event, Issue.repository.full_name)
+            HubRepo = Issue.repository
+            HubPullRequest = Issue.as_pull_request()
     except:
+        pass
+    if not HubRepo or not HubPullRequest:
         # Skip requests if the PyGitHub objects can not be retrieved
         return None, None, None, None, 200, 'ignore %s event for which the GitHub objects can not be retrieved' % (event)
-    # Skip pull request that is not open
+    # Skip pull request that is a draft
+    if HubPullRequest.draft:
+        return None, None, None, None, 200, 'ignore %s event against a draft pull request' % (event)
+    # Skip pull request that is not open unless the pull request is being closed
     if event != 'pull_request' or action != 'closed':
         if HubPullRequest.state != 'open':
             return None, None, None, None, 200, 'ignore %s event against a pull request with state %s that is not open' % (event, HubPullRequest.state)
     # Skip pull request with a base repo that is different than the expected repo
     if HubPullRequest.base.repo.full_name != HubRepo.full_name:
         return None, None, None, None, 200, 'ignore %s event against unexpected repo %s' % (event, HubPullRequest.base.repo.full_name)
-    # Skip pull requests with a base branch that is not the default branch
-    if HubPullRequest.base.ref != HubRepo.default_branch:
-        return None, None, None, None, 200, 'ignore %s event against non-default base branch %s' % (event, HubPullRequest.base.ref)
+    # Skip pull requests with a base branch that is not protected or the default branch
+    Branch = HubRepo.get_branch(HubPullRequest.base.ref)
+    if not Branch or not Branch.protected:
+        if HubPullRequest.base.ref != HubRepo.default_branch:
+            return None, None, None, None, 200, 'ignore %s event against base branch %s that is not protected or the default branch' % (event, HubPullRequest.base.ref)
     # Fetch the git commits for the pull request and return a git repo
     # object and the contents of Maintainers.txt
     GitRepo, Maintainers = FetchPullRequest (HubPullRequest, eventlog)
@@ -257,10 +268,10 @@ def VerifyPullRequest(event, action, payload, HubOrIssue, eventlog):
 def GetPatchSeriesInformation(event, action, HubPullRequest):
     NewPatchSeries = False
     PatchSeriesVersion = 1;
-    if event == 'pull_request' and action in ['opened', 'reopened']:
+    if event == 'pull_request' and action in ['opened', 'reopened', 'ready_for_review']:
         # New pull request was created
         NewPatchSeries = True
-    if event != 'pull_request' or action in ['synchronize', 'edited', 'closed', 'reopened']:
+    if event != 'pull_request' or action in ['synchronize', 'edited', 'closed', 'reopened', 'ready_for_review']:
         # Existing pull request was updated.
         # Commits were added to an existing pull request or an existing pull
         # request was forced push. Get events to determine what happened
@@ -280,7 +291,7 @@ def GetPatchSeriesInformation(event, action, HubPullRequest):
 
 def ProcessIssueComment(event, action, payload, Hub, app, webhookconfiguration, eventlog):
     # Verify the pull request referenced in the payload
-    HubRepo, HubPullRequest, GitRepo, Maintainers, Status, Message = VerifyPullRequest(event, action, payload, Hub, eventlog)
+    HubRepo, HubPullRequest, GitRepo, Maintainers, Status, Message = VerifyPullRequest(event, action, payload, Hub, None, eventlog)
     if Status:
         return Status, Message
     # Determine if this is a new patch series and the version of the patch series
@@ -335,7 +346,7 @@ def ProcessCommitComment(event, action, payload, Hub, app, webhookconfiguration,
     EmailContents   = []
     for Issue in Hub.search_issues('SHA:' + CommitId):
         # Verify pull request referenced in Issue
-        HubRepo, HubPullRequest, GitRepo, Maintainers, Status, Message = VerifyPullRequest(event, action, payload, Issue, eventlog)
+        HubRepo, HubPullRequest, GitRepo, Maintainers, Status, Message = VerifyPullRequest(event, action, payload, None, Issue, eventlog)
         if Status:
             eventlog.AddLogEntry (LogTypeEnum.Message, 'PR[%d]' % (Issue.id), Message)
             continue
@@ -379,7 +390,7 @@ def ProcessCommitComment(event, action, payload, Hub, app, webhookconfiguration,
 
 def ProcessPullRequestReview(event, action, payload, Hub, app, webhookconfiguration, eventlog):
     # Verify the pull request referenced in the payload
-    HubRepo, HubPullRequest, GitRepo, Maintainers, Status, Message = VerifyPullRequest(event, action, payload, Hub, eventlog)
+    HubRepo, HubPullRequest, GitRepo, Maintainers, Status, Message = VerifyPullRequest(event, action, payload, Hub, None, eventlog)
     if Status:
         return Status, Message
     # Build dictionary of review comments
@@ -486,7 +497,7 @@ def ProcessPullRequestReview(event, action, payload, Hub, app, webhookconfigurat
 
 def ProcessPullRequest(event, action, payload, Hub, app, webhookconfiguration, eventlog):
     # Verify the pull request referenced in the payload
-    HubRepo, HubPullRequest, GitRepo, Maintainers, Status, Message = VerifyPullRequest(event, action, payload, Hub, eventlog)
+    HubRepo, HubPullRequest, GitRepo, Maintainers, Status, Message = VerifyPullRequest(event, action, payload, Hub, None, eventlog)
     if Status:
         return Status, Message
     # Determine if this is a new patch series and the version of the patch series
@@ -507,7 +518,7 @@ def ProcessPullRequest(event, action, payload, Hub, app, webhookconfiguration, e
         PullRequestAddressList  = list(set(PullRequestAddressList  + AddressList))
         PullRequestGitHubIdList = list(set(PullRequestGitHubIdList + GitHubIdList))
         PullRequestEmailList    = list(set(PullRequestEmailList    + EmailList))
-        if action in ['opened', 'synchronize', 'reopened']:
+        if action in ['opened', 'synchronize', 'reopened', 'ready_for_review']:
             # Update the list of required reviewers for this commit
             ReviewersUpdated = UpdatePullRequestCommitReviewers (Commit, GitHubIdList, eventlog)
             # Generate email contents for all commits in a pull request if this is
@@ -528,7 +539,7 @@ def ProcessPullRequest(event, action, payload, Hub, app, webhookconfiguration, e
                             )
                 EmailContents.append (Email)
 
-    if action in ['opened', 'synchronize', 'reopened']:
+    if action in ['opened', 'synchronize', 'reopened', 'ready_for_review']:
         # Update the list of required reviewers for the pull request
         UpdatePullRequestReviewers (Hub, HubRepo, HubPullRequest, PullRequestGitHubIdList, eventlog)
 
@@ -628,8 +639,8 @@ def ProcessGithubRequest(app, webhookconfiguration, eventlog):
 
     # Process pull request events
     if event == 'pull_request':
-        if action not in ['opened', 'synchronize', 'edited', 'closed', 'reopened']:
-            return 200, 'ignore %s event with action %s. Only opened, synchronize, edited, closed, and reopened are supported.' % (event, action)
+        if action not in ['opened', 'synchronize', 'edited', 'closed', 'reopened', 'ready_for_review']:
+            return 200, 'ignore %s event with action %s. Only opened, synchronize, edited, closed, reopened, and ready_for_review are supported.' % (event, action)
         return ProcessPullRequest(event, action, payload, Hub, app, webhookconfiguration, eventlog)
 
     return 200, 'ignore unsupported event %s with action %s' % (event, action)
