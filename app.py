@@ -11,6 +11,7 @@ TianoCore Code Review Archive Service Flask Application
 import os
 import socks
 import smtplib
+from collections import OrderedDict
 from json import dumps
 from flask_bootstrap import Bootstrap
 from flask import Flask, render_template, request, redirect, abort, send_from_directory, make_response
@@ -22,17 +23,21 @@ from Server import ProcessGithubRequest
 
 class WebhookContext(object):
     def __init__(self, app, webhookconfiguration, eventlog):
-        self.app                  = app
-        self.webhookconfiguration = webhookconfiguration
-        self.eventlog             = eventlog
-        self.event                = ''
-        self.action               = ''
-        self.payload              = None
-        self.Hub                  = None
-        self.GitRepo              = None
-        self.HubRepo              = None
-        self.HubPullRequest       = None
-        self.Maintainers          = None
+        self.app                     = app
+        self.webhookconfiguration    = webhookconfiguration
+        self.eventlog                = eventlog
+        self.event                   = ''
+        self.action                  = ''
+        self.payload                 = None
+        self.Hub                     = None
+        self.GitRepo                 = None
+        self.HubRepo                 = None
+        self.HubPullRequest          = None
+        self.CommitList              = []
+        self.CommitAddressDict       = OrderedDict()
+        self.CommitGitHubIdDict      = OrderedDict()
+        self.PullRequestAddressList  = []
+        self.PullRequestGitHubIdList = []
 
 def create_app():
     app = Flask(__name__)

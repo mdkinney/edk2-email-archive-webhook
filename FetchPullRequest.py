@@ -17,7 +17,11 @@ import textwrap
 import threading
 import shutil
 import stat
+import datetime
+import requests
+from collections import OrderedDict
 from Models import LogTypeEnum
+from GetMaintainers import GetMaintainers, ParseMaintainerAddresses
 
 GitRepositoryLock = threading.Lock()
 
@@ -28,7 +32,7 @@ class Progress(git.remote.RemoteProgress):
     def update(self, op_code, cur_count, max_count=None, message=''):
         self.Log += '    ' + self._cur_line + '\n'
 
-def FetchPullRequest (HubPullRequest, eventlog, Depth = 1):
+def FetchPullRequest (HubPullRequest, eventlog):
     #
     # Fetch the base.ref branch and current PR branch from the base repository
     # of the pull request
@@ -39,75 +43,106 @@ def FetchPullRequest (HubPullRequest, eventlog, Depth = 1):
     if os.path.exists (RepositoryPath):
         try:
             Message += 'mount local repository %s\n' % (RepositoryPath)
+            StartTime = datetime.datetime.now()
             GitRepo = git.Repo(RepositoryPath)
             Origin = GitRepo.remotes['origin']
-            Message += '  SUCCESS\n'
+            Message += '  SUCCESS:' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
         except:
             try:
                 Message += 'create local repository %s\n' % (RepositoryPath)
+                StartTime = datetime.datetime.now()
                 GitRepo = git.Repo.init (RepositoryPath, bare=True)
                 Origin = GitRepo.create_remote ('origin', HubPullRequest.base.repo.html_url)
-                Message += '  SUCCESS\n'
+                Message += '  SUCCESS:' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
             except:
-                Message += '  FAIL\n'
+                Message += '  FAIL   :' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
                 eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (HubPullRequest.number), Message)
                 GitRepositoryLock.release()
-                return None, None
+                return None, None, None, None, None, None
     else:
         try:
             Message += 'create local repository %s\n' % (RepositoryPath)
+            StartTime = datetime.datetime.now()
             os.makedirs (RepositoryPath)
             GitRepo = git.Repo.init (RepositoryPath, bare=True)
             Origin = GitRepo.create_remote ('origin', HubPullRequest.base.repo.html_url)
-            Message += '  SUCCESS\n'
+            Message += '  SUCCESS:' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
         except:
-            Message += '  FAIL\n'
+            Message += '  FAIL   :' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
             eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (HubPullRequest.number), Message)
             GitRepositoryLock.release()
-            return None, None
+            return None, None, None, None, None, None
 
-    #
-    # Shallow fetch base.ref branch from origin
-    #
-    try:
-        Message += 'git fetch origin %s\n' % (HubPullRequest.base.ref)
-        P = Progress()
-        Origin.fetch(HubPullRequest.base.ref, progress=P, depth = Depth)
-        Message = Message + P.Log
-        Message += '  SUCCESS\n'
-    except:
-        Message += '  FAIL\n'
-        eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (HubPullRequest.number), Message)
-        GitRepositoryLock.release()
-        return None, None
     #
     # Fetch the current pull request branch from origin
     #
-    try:
-        Message += 'git fetch origin +refs/pull/%d/*:refs/remotes/origin/pr/%d/*\n' % (HubPullRequest.number, HubPullRequest.number)
-        Origin.fetch('+refs/pull/%d/*:refs/remotes/origin/pr/%d/*' % (HubPullRequest.number, HubPullRequest.number), progress=Progress())
-        Message += '  SUCCESS\n'
-    except:
-        Message += '  FAIL\n'
-        eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (HubPullRequest.number), Message)
-        GitRepositoryLock.release()
-        return None, None
+    Message += 'Check commits\n'
+    StartTime = datetime.datetime.now()
+    # Get list of commits from the pull request
+    CommitList = [Commit for Commit in HubPullRequest.get_commits()]
+    FetchRequired = False
+    for Commit in CommitList:
+        try:
+            GitRepo.commit(Commit.sha)
+        except:
+            FetchRequired = True
+    Message += '  SUCCESS:' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
+    if FetchRequired:
+        P = Progress()
+        try:
+            Message += 'git fetch origin +refs/pull/%d/*:refs/remotes/origin/pr/%d/*\n' % (HubPullRequest.number, HubPullRequest.number)
+            StartTime = datetime.datetime.now()
+            Origin.fetch('+refs/pull/%d/*:refs/remotes/origin/pr/%d/*' % (HubPullRequest.number, HubPullRequest.number), progress=P, depth = len(CommitList) + 1)
+            Message = Message + P.Log
+            Message += '  SUCCESS:' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
+        except:
+            Message = Message + P.Log
+            Message += '  FAIL   :' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
+            eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (HubPullRequest.number), Message)
+            GitRepositoryLock.release()
+            return None, None, None, None, None, None
 
     #
-    # Retrieve the latest version of Maintainers.txt from origin/base.ref
+    # Read Maintainers.txt from GitHub as a raw file in base branch of the pull request
     #
     try:
-        Message += 'git show origin/%s:Maintainers.txt\n' % (HubPullRequest.base.ref)
-        Maintainers = GitRepo.git.show('origin/%s:Maintainers.txt' % (HubPullRequest.base.ref))
-        Message += '  SUCCESS\n'
+        url = 'https://raw.githubusercontent.com/%s/%s/Maintainers.txt' % (HubPullRequest.base.repo.full_name, HubPullRequest.base.ref)
+        Message += 'Read file ' + url + '\n'
+        StartTime = datetime.datetime.now()
+        Response=requests.get(url)
+        Maintainers = Response.content.decode('utf-8')
+        Message += '  SUCCESS:' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
     except:
-        Message += '  FAIL.  Maintainers.txt does not exist in origin/%s\n' % (HubPullRequest.base.ref)
-        Maintainers = ''
+        # If Maintainers.txt is not available, then return an error
+        Message += '  FAIL   :' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
+        eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (HubPullRequest.number), Message)
+        return None, None, None, None, None, None
+
+    # Build list of commit SHA values and list of all maintainers/reviewers
+    #
+    # NOTE: If scope required is entire PR, then git diff on commit range
+    # may be faster way to get list of files modified across an entire PR
+    #
+    Message += 'Build list of addresses from Maintainers.txt for each commit\n'
+    StartTime = datetime.datetime.now()
+    CommitAddressDict       = OrderedDict()
+    CommitGitHubIdDict      = OrderedDict()
+    PullRequestAddressList  = []
+    PullRequestGitHubIdList = []
+    for Commit in CommitList:
+        CommitFiles = list(GitRepo.commit(Commit.sha).stats.files.keys())
+        Addresses = GetMaintainers (Maintainers, CommitFiles)
+        AddressList, GitHubIdList, EmailList = ParseMaintainerAddresses(Addresses)
+        CommitAddressDict[Commit.sha]  = AddressList
+        CommitGitHubIdDict[Commit.sha] = GitHubIdList
+        PullRequestAddressList  = list(set(PullRequestAddressList + AddressList))
+        PullRequestGitHubIdList = list(set(PullRequestGitHubIdList + GitHubIdList))
+    Message += '  SUCCESS:' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
 
     eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (HubPullRequest.number), Message)
 
     GitRepositoryLock.release()
-    return GitRepo, Maintainers
+    return GitRepo, CommitList, CommitAddressDict, CommitGitHubIdDict, PullRequestAddressList, PullRequestGitHubIdList
 
 def DeleteRepositoryCache (webhookconfiguration):
     RepositoryPath = os.path.normpath (os.path.join ('Repository', webhookconfiguration.GithubOrgName, webhookconfiguration.GithubRepoName))
