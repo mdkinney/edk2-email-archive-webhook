@@ -20,9 +20,7 @@ from flask import request, abort
 from github import Github
 from GetMaintainers import GetMaintainers, ParseMaintainerAddresses
 from SendEmails import SendEmails
-from FetchPullRequest import FetchPullRequest, GitRepositoryLock
-from FetchPullRequest import FormatPatch
-from FetchPullRequest import FormatPatchSummary
+from FetchPullRequest import FetchPullRequest, FormatPatch, FormatPatchSummary
 from Models import LogTypeEnum
 
 REVIEW_REQUEST     = '[CodeReview] Review-request @'
@@ -264,12 +262,14 @@ def VerifyPullRequest(Context, Issue = None):
     if not Branch or not Branch.protected:
         if HubPullRequest.base.ref != HubRepo.default_branch:
             return 200, 'ignore %s event against base branch %s that is not protected or the default branch' % (Context.event, HubPullRequest.base.ref)
+    # Update context structure
+    Context.HubRepo            = HubRepo
+    Context.HubPullRequest     = HubPullRequest
     # Fetch the git commits for the pull request and return a git repo
     # object and the contents of Maintainers.txt
-    GitRepo, CommitList, CommitAddressDict, CommitGitHubIdDict, PullRequestAddressList, PullRequestGitHubIdList = FetchPullRequest (HubPullRequest, Context.eventlog)
-    if GitRepo is None:
-        return 200, 'ignore %s event for a PR that can not be fetched' % (Context.event)
-
+    Status, Message = FetchPullRequest (Context)
+    if Status:
+        return Status, Message
     # Determine if this is a new patch series and the version of the patch series
     NewPatchSeries = False
     PatchSeriesVersion = 1;
@@ -292,18 +292,9 @@ def VerifyPullRequest(Context, Issue = None):
                 # patch series should be emailed again.
                 if abs(Event.created_at - HubPullRequest.updated_at).seconds <= 2:
                     NewPatchSeries = True
-
     # Update context structure
-    Context.HubRepo                 = HubRepo
-    Context.HubPullRequest          = HubPullRequest
-    Context.GitRepo                 = GitRepo
-    Context.CommitList              = CommitList
-    Context.CommitAddressDict       = CommitAddressDict
-    Context.CommitGitHubIdDict      = CommitGitHubIdDict
-    Context.PullRequestAddressList  = PullRequestAddressList
-    Context.PullRequestGitHubIdList = PullRequestGitHubIdList
-    Context.NewPatchSeries          = NewPatchSeries
-    Context.PatchSeriesVersion      = PatchSeriesVersion
+    Context.NewPatchSeries     = NewPatchSeries
+    Context.PatchSeriesVersion = PatchSeriesVersion
     return 0, ''
 
 def ProcessIssueComment(Context):

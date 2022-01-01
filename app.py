@@ -171,8 +171,9 @@ def create_app():
     def webhook_deletegitrepocache(repoid):
         if request.method == 'POST':
             webhookconfiguration = WebhookConfiguration.query.get_or_404(repoid)
-            Status = DeleteRepositoryCache (webhookconfiguration)
             eventlog = webhookconfiguration.AddEventEntry ()
+            Context = WebhookContext (app, webhookconfiguration, eventlog)
+            Status = DeleteRepositoryCache (Context)
             if Status:
                 eventlog.AddLogEntry (LogTypeEnum.Message, 'Delete Repo PASS', '')
             else:
