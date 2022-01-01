@@ -321,22 +321,21 @@ def QuoteCommentList (Comments, Before = '', After = '', LineEnding = '\n', Pref
 def FormatPatch (
         Context,
         Commit,
-        AddressList,
-        PatchSeriesVersion,
         PatchNumber,
-        CommentUser = None,
-        CommentType = None,
-        CommentId = None,
-        CommentPosition = None,
-        CommentPath = None,
-        Prefix = '',
+        CommentUser        = None,
+        CommentId          = None,
+        CommentPosition    = None,
+        CommentPath        = None,
+        Prefix             = '',
         CommentInReplyToId = None,
-        LargePatchLines = 500
+        LargePatchLines    = 500
         ):
 
-    HubRepo        = Context.HubRepo
-    HubPullRequest = Context.HubPullRequest
-    GitRepo        = Context.GitRepo
+    HubRepo            = Context.HubRepo
+    HubPullRequest     = Context.HubPullRequest
+    GitRepo            = Context.GitRepo
+    PatchSeriesVersion = Context.PatchSeriesVersion
+    AddressList        = Context.CommitAddressDict[Commit.sha]
 
     #
     # Default range is a single commit
@@ -497,9 +496,6 @@ def FormatPatch (
 
 def FormatPatchSummary (
         Context,
-        AddressList,
-        PatchSeriesVersion,
-        CommitRange = None,
         CommentUser = None,
         CommentId = None,
         CommentPosition = None,
@@ -515,16 +511,14 @@ def FormatPatchSummary (
         LargePatchLines = 500
         ):
 
-    HubRepo        = Context.HubRepo
-    HubPullRequest = Context.HubPullRequest
-    GitRepo        = Context.GitRepo
+    HubRepo            = Context.HubRepo
+    HubPullRequest     = Context.HubPullRequest
+    GitRepo            = Context.GitRepo
+    AddressList        = Context.PullRequestAddressList
+    PatchSeriesVersion = Context.PatchSeriesVersion
 
-    #
-    # Default range is the entire pull request
-    #
-    if CommitRange is None:
-        CommitShaList = [Commit.sha for Commit in HubPullRequest.get_commits()]
-        CommitRange = CommitShaList[0] + '..' + CommitShaList[-1]
+    # Default commit range is the entire pull request
+    CommitRange = Context.CommitList[0].sha + '..' + Context.CommitList[-1].sha
 
     #
     # Format the Subject:
@@ -767,7 +761,7 @@ def FormatPatchSummary (
             #
             # If this is a comment against the description of the pull request
             # then discard the file change summary and append the review comments
-            # quoting the decription of the pull request and all previous comments.
+            # quoting the description of the pull request and all previous comments.
             #
             IssueComments = []
             for Comment in HubPullRequest.get_issue_comments():

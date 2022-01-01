@@ -31,7 +31,7 @@ SERIES_REVIEWED_BY = '[CodeReview] Series-reviewed-by'
 ACKED_BY           = '[CodeReview] Acked-by'
 TESTED_BY          = '[CodeReview] Tested-by'
 
-def UpdatePullRequestCommitReviewers (Context, Commit, GitHubIdList):
+def UpdatePullRequestCommitReviewers (Context, Commit):
     # Retrieve all review comments for this commit
     Body = []
     for Comment in Commit.get_comments():
@@ -40,7 +40,7 @@ def UpdatePullRequestCommitReviewers (Context, Commit, GitHubIdList):
     # Determine if any reviewers need to be added to this commit
     Message = ''
     AddReviewers = []
-    for Reviewer in GitHubIdList:
+    for Reviewer in Context.CommitGitHubIdDict[Commit.sha]:
         Message = Message + REVIEW_REQUEST + Reviewer
         if REVIEW_REQUEST + Reviewer not in Body:
             AddReviewers.append(REVIEW_REQUEST + Reviewer + '\n')
@@ -55,7 +55,7 @@ def UpdatePullRequestCommitReviewers (Context, Commit, GitHubIdList):
     # Return True if reviewers were added to this commit
     return AddReviewers != []
 
-def UpdatePullRequestReviewers (Context, PullRequestGitHubIdList):
+def UpdatePullRequestReviewers (Context):
     Message = ''
     # Get list of collaborators for this repository
     Collaborators = Context.HubRepo.get_collaborators()
@@ -64,7 +64,7 @@ def UpdatePullRequestReviewers (Context, PullRequestGitHubIdList):
     # Determine if any reviewers need to be removed
     RemoveReviewerList = []
     for Reviewer in RequestedReviewers:
-        if Reviewer.login not in PullRequestGitHubIdList:
+        if Reviewer.login not in Context.PullRequestGitHubIdList:
             # Remove assigned reviewer that no longer required.
             # Occurs if files/packages are removed from the PR that no longer
             # require a specific reviewer. Can also occur if Maintainers.txt
@@ -86,7 +86,7 @@ def UpdatePullRequestReviewers (Context, PullRequestGitHubIdList):
             continue
     # Determine if any reviewers need to be added
     AddReviewerList = []
-    for Login in PullRequestGitHubIdList:
+    for Login in Context.PullRequestGitHubIdList:
         Reviewer = Context.Hub.get_user(Login)
         if Reviewer == Context.HubPullRequest.user:
             # Author of PR can not be reviewer of PR
@@ -269,18 +269,8 @@ def VerifyPullRequest(Context, Issue = None):
     GitRepo, CommitList, CommitAddressDict, CommitGitHubIdDict, PullRequestAddressList, PullRequestGitHubIdList = FetchPullRequest (HubPullRequest, Context.eventlog)
     if GitRepo is None:
         return 200, 'ignore %s event for a PR that can not be fetched' % (Context.event)
-    # Update context structure
-    Context.HubRepo                 = HubRepo
-    Context.HubPullRequest          = HubPullRequest
-    Context.GitRepo                 = GitRepo
-    Context.CommitList              = CommitList
-    Context.CommitAddressDict       = CommitAddressDict
-    Context.CommitGitHubIdDict      = CommitGitHubIdDict
-    Context.PullRequestAddressList  = PullRequestAddressList
-    Context.PullRequestGitHubIdList = PullRequestGitHubIdList
-    return 0, ''
 
-def GetPatchSeriesInformation(Context):
+    # Determine if this is a new patch series and the version of the patch series
     NewPatchSeries = False
     PatchSeriesVersion = 1;
     if Context.event == 'pull_request' and Context.action in ['opened', 'reopened', 'ready_for_review']:
@@ -290,7 +280,7 @@ def GetPatchSeriesInformation(Context):
         # Existing pull request was updated.
         # Commits were added to an existing pull request or an existing pull
         # request was forced push. Get events to determine what happened
-        for Event in Context.HubPullRequest.get_issue_events():
+        for Event in HubPullRequest.get_issue_events():
             # Count head_ref_force_pushed and reopened events to determine
             # the version of the patch series.
             if Event.event in ['head_ref_force_pushed', 'reopened']:
@@ -300,17 +290,27 @@ def GetPatchSeriesInformation(Context):
                 # same date/time (or within 2 seconds) that the pull request
                 # was updated, then this was a forced push and the entire
                 # patch series should be emailed again.
-                if abs(Event.created_at - Context.HubPullRequest.updated_at).seconds <= 2:
+                if abs(Event.created_at - HubPullRequest.updated_at).seconds <= 2:
                     NewPatchSeries = True
-    return NewPatchSeries, PatchSeriesVersion
+
+    # Update context structure
+    Context.HubRepo                 = HubRepo
+    Context.HubPullRequest          = HubPullRequest
+    Context.GitRepo                 = GitRepo
+    Context.CommitList              = CommitList
+    Context.CommitAddressDict       = CommitAddressDict
+    Context.CommitGitHubIdDict      = CommitGitHubIdDict
+    Context.PullRequestAddressList  = PullRequestAddressList
+    Context.PullRequestGitHubIdList = PullRequestGitHubIdList
+    Context.NewPatchSeries          = NewPatchSeries
+    Context.PatchSeriesVersion      = PatchSeriesVersion
+    return 0, ''
 
 def ProcessIssueComment(Context):
     # Verify the pull request referenced in the payload
     Status, Message = VerifyPullRequest(Context)
     if Status:
         return Status, Message
-    # Determine if this is a new patch series and the version of the patch series
-    NewPatchSeries, PatchSeriesVersion = GetPatchSeriesInformation(Context)
     # Generate the summary email patch #0 with body of email prefixed with >.
     UpdateDeltaTime = 0
     if Context.action == 'edited':
@@ -323,13 +323,8 @@ def ProcessIssueComment(Context):
         UpdateDeltaTime = -1
     Summary = FormatPatchSummary (
                   Context,
-                  Context.PullRequestAddressList,
-                  PatchSeriesVersion,
-                  CommitRange     = Context.CommitList[0].sha + '..' + Context.CommitList[-1].sha,
                   CommentUser     = Context.payload['comment']['user']['login'],
                   CommentId       = Context.payload['comment']['id'],
-                  CommentPosition = None,
-                  CommentPath     = None,
                   Prefix          = '> ',
                   UpdateDeltaTime = UpdateDeltaTime
                   )
@@ -339,36 +334,28 @@ def ProcessIssueComment(Context):
 
 def ProcessCommitComment(Context):
     # Search for issues/pull requests that contain the comment's commit_id
-    CommitId        = Context.payload['comment']['commit_id']
-    CommentId       = Context.payload['comment']['id']
-    CommentPosition = Context.payload['comment']['position']
-    CommentPath     = Context.payload['comment']['path']
-    EmailContents   = []
+    CommitId = Context.payload['comment']['commit_id']
+    EmailContents = []
     for Issue in Context.Hub.search_issues('SHA:' + CommitId):
         # Verify pull request referenced in Issue
         Status, Message = VerifyPullRequest(Context, Issue)
         if Status:
             Context.eventlog.AddLogEntry (LogTypeEnum.Message, 'PR[%d]' % (Issue.id), Message)
             continue
-        # Determine if this is a new patch series and the version of the patch series
-        NewPatchSeries, PatchSeriesVersion = (Context)
         # Determine the patch number of the commit with the comment
         PatchNumber = 0
         for Commit in Context.CommitList:
             PatchNumber = PatchNumber + 1
             if Commit.sha == CommitId:
                 break
-
         Email = FormatPatch (
                     Context,
                     Commit,
-                    Context.CommitAddressDict[Commit.sha],
-                    PatchSeriesVersion,
                     PatchNumber,
                     CommentUser     = Context.payload['comment']['user']['login'],
-                    CommentId       = CommentId,
-                    CommentPosition = CommentPosition,
-                    CommentPath     = CommentPath,
+                    CommentId       = Context.payload['comment']['id'],
+                    CommentPosition = Context.payload['comment']['position'],
+                    CommentPath     = Context.payload['comment']['path'],
                     Prefix          = '> '
                     )
         EmailContents.append (Email)
@@ -399,7 +386,6 @@ def ProcessPullRequestReview(Context):
     ParentReviewId = None
     UpdateDeltaTime = 0
     if Context.event in ['pull_request_review']:
-        CommitId           = Context.payload['review']['commit_id']
         CommentUser        = Context.payload['review']['user']['login'],
         CommentId          = None
         CommentPosition    = None
@@ -423,7 +409,6 @@ def ProcessPullRequestReview(Context):
             UpdatedAt = datetime.datetime.strptime(Context.payload['pull_request']['updated_at'], "%Y-%m-%dT%H:%M:%SZ")
             UpdateDeltaTime = (UpdatedAt - Review.submitted_at).seconds
     if Context.event in ['pull_request_review_comment']:
-        CommitId           = Context.payload['comment']['commit_id']
         CommentId          = Context.payload['comment']['id']
         CommentUser        = Context.payload['comment']['user']['login'],
         CommentPosition    = Context.payload['comment']['position']
@@ -445,14 +430,9 @@ def ProcessPullRequestReview(Context):
         if Context.action == 'edited' and Review:
             UpdatedAt = datetime.datetime.strptime(Context.payload['comment']['updated_at'], "%Y-%m-%dT%H:%M:%SZ")
             UpdateDeltaTime = (UpdatedAt - Review.submitted_at).seconds
-    # Determine if this is a new patch series and the version of the patch series
-    NewPatchSeries, PatchSeriesVersion = GetPatchSeriesInformation(Context)
 
     Email = FormatPatchSummary (
                 Context,
-                Context.PullRequestAddressList,
-                PatchSeriesVersion,
-                CommitRange        = Context.CommitList[0].sha + '..' + Context.CommitList[-1].sha,
                 CommentUser        = CommentUser,
                 CommentId          = CommentId,
                 CommentPosition    = CommentPosition,
@@ -475,66 +455,44 @@ def ProcessPullRequest(Context):
     Status, Message = VerifyPullRequest(Context)
     if Status:
         return Status, Message
-    # Determine if this is a new patch series and the version of the patch series
-    NewPatchSeries, PatchSeriesVersion = GetPatchSeriesInformation(Context)
-
     EmailContents = []
     PatchNumber = 0
     for Commit in Context.CommitList:
         PatchNumber = PatchNumber + 1
         if Context.action in ['opened', 'synchronize', 'reopened', 'ready_for_review']:
             # Update the list of required reviewers for this commit
-            ReviewersUpdated = UpdatePullRequestCommitReviewers (Context, Commit, Context.CommitGitHubIdDict[Commit.sha])
+            ReviewersUpdated = UpdatePullRequestCommitReviewers (Context, Commit)
             # Generate email contents for all commits in a pull request if this is
             # a new pull request or a forced push was done to an existing pull request.
             # Generate email contents for patches that add new reviewers. This
             # occurs when when new commits are added to an existing pull request.
-            if NewPatchSeries or ReviewersUpdated:
-                Email = FormatPatch (
-                            Context,
-                            Commit,
-                            Context.CommitAddressDict[Commit.sha],
-                            PatchSeriesVersion,
-                            PatchNumber
-                            )
+            if Context.NewPatchSeries or ReviewersUpdated:
+                Email = FormatPatch (Context, Commit, PatchNumber)
                 EmailContents.append (Email)
-
     if Context.action in ['opened', 'synchronize', 'reopened', 'ready_for_review']:
         # Update the list of required reviewers for the pull request
-        UpdatePullRequestReviewers (Context, Context.PullRequestGitHubIdList)
-
+        UpdatePullRequestReviewers (Context)
     # If this is a new pull request or a forced push on a pull request or an
     # edit of the pull request title or description, then generate the
     # summary email patch #0 and add to be beginning of the list of emails
     # to send.
-    if NewPatchSeries or Context.action in ['edited', 'closed']:
+    if Context.NewPatchSeries or Context.action in ['edited', 'closed']:
         UpdateDeltaTime = 0
         if Context.action in ['edited', 'closed']:
             UpdateDeltaTime = (Context.HubPullRequest.updated_at - Context.HubPullRequest.created_at).seconds
-        Summary = FormatPatchSummary (
-                      Context,
-                      Context.PullRequestAddressList,
-                      PatchSeriesVersion,
-                      UpdateDeltaTime = UpdateDeltaTime
-                      )
+        Summary = FormatPatchSummary (Context, UpdateDeltaTime = UpdateDeltaTime)
         EmailContents.insert (0, Summary)
     # Send generated emails
     SendEmails (Context, EmailContents)
     return 200, 'successfully processed %s event with action %s' % (Context.event, Context.action)
 
 def ProcessGithubRequest(Context):
-    #
     # Authenticate the request header.
-    #
     AuthenticateGithubRequestHeader(Context)
-
-    #
     # Parse and verify the GitHub payload is for this webhook
-    #
     Status, Message = VerifyPayload(Context)
     if Status:
         return Status, Message
-
     # Process issue_comment events
     # These are comments against the entire pull request
     # Quote Patch #0 Body and add comment below below with commenters GitHubID
@@ -544,7 +502,6 @@ def ProcessGithubRequest(Context):
         if 'pull_request' not in Context.payload['issue']:
             return 200, 'ignore %s event without an associated pull request' % (Context.event)
         return ProcessIssueComment(Context)
-
     # Process commit_comment events
     # These are comments against a specific commit
     # Quote Patch #n commit message and add comment below below with commenters GitHubID
@@ -559,7 +516,6 @@ def ProcessGithubRequest(Context):
             if Line.startswith (REVIEW_REQUEST):
                 return 200, 'ignore %s event with REVIEW_REQUEST body generated by this webhook' % (Context.event)
         return ProcessCommitComment(Context)
-
     # Process pull_request_review events
     # Quote Patch #0 commit message and patch diff of file comment is against
     if Context.event == 'pull_request_review':
@@ -568,7 +524,6 @@ def ProcessGithubRequest(Context):
         if Context.action == 'edited' and Context.payload['changes'] == {}:
             return 200, 'ignore %s event with action %s that has no changes.' % (Context.event, Context.action)
         return ProcessPullRequestReview(Context)
-
     # Process pull_request_review_comment events
     # Quote Patch #0 commit message and patch diff of file comment is against
     if Context.event == 'pull_request_review_comment':
@@ -582,11 +537,9 @@ def ProcessGithubRequest(Context):
             if Line.startswith (REVIEW_REQUEST):
                 return 200, 'ignore %s event with REVIEW_REQUEST body generated by this webhook' % (Context.event)
         return ProcessPullRequestReview(Context.event)
-
     # Process pull_request events
     if Context.event == 'pull_request':
         if Context.action not in ['opened', 'synchronize', 'edited', 'closed', 'reopened', 'ready_for_review']:
             return 200, 'ignore %s event with action %s. Only opened, synchronize, edited, closed, reopened, and ready_for_review are supported.' % (Context.event, Context.action)
         return ProcessPullRequest(Context)
-
     return 200, 'ignore unsupported event %s with action %s' % (Context.event, Context.action)

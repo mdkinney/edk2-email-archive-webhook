@@ -38,6 +38,8 @@ class WebhookContext(object):
         self.CommitGitHubIdDict      = OrderedDict()
         self.PullRequestAddressList  = []
         self.PullRequestGitHubIdList = []
+        self.NewPatchSeries          = False
+        self.PatchSeriesVersion      = 0
 
 def create_app():
     app = Flask(__name__)
