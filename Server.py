@@ -213,7 +213,7 @@ def VerifyPayload(Context):
     if 'full_name' not in payload['repository']:
         return 200, 'ignore event %s with no repository full name' % (Context.event)
     # Skip requests that are not for the configured repository
-    if payload['repository']['full_name'] != Context.webhookconfiguration.GithubOrgName + '/' + Context.webhookconfiguration.GithubRepoName:
+    if payload['repository']['full_name'] != Context.webhookconfiguration.GithubRepo:
         return 200, 'ignore event %s for incorrect repository %s' % (Context.event, payload['repository']['full_name'])
     # Retrieve Hub object for this repo
     try:

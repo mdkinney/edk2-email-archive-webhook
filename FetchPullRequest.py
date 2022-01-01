@@ -106,7 +106,11 @@ def FetchPullRequest(Context):
     # Read Maintainers.txt from GitHub as a raw file in base branch of the pull request
     #
     try:
-        url = 'https://raw.githubusercontent.com/%s/%s/Maintainers.txt' % (Context.HubPullRequest.base.repo.full_name, Context.HubPullRequest.base.ref)
+        url = 'https://raw.githubusercontent.com/%s/%s/%s' % (
+            Context.HubPullRequest.base.repo.full_name,
+            Context.HubPullRequest.base.ref,
+            Context.webhookconfiguration.MaintainersTxtPath
+            )
         Message += 'Read file ' + url + '\n'
         StartTime = datetime.datetime.now()
         Response=requests.get(url)
@@ -139,9 +143,9 @@ def FetchPullRequest(Context):
         PullRequestGitHubIdList = list(set(PullRequestGitHubIdList + GitHubIdList))
     Message += '  SUCCESS:' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
 
-    Context.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (Context.HubPullRequest.number), Message)
-
     GitRepositoryLock.release()
+
+    Context.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (Context.HubPullRequest.number), Message)
 
     # Update context structure
     Context.GitRepo                 = GitRepo
@@ -153,7 +157,7 @@ def FetchPullRequest(Context):
     return 0, ''
 
 def DeleteRepositoryCache (Context):
-    RepositoryPath = os.path.normpath (os.path.join ('Repository', Context.webhookconfiguration.GithubOrgName, Context.webhookconfiguration.GithubRepoName))
+    RepositoryPath = os.path.normpath (os.path.join ('Repository', Context.webhookconfiguration.GithubRepo))
     if not os.path.exists (RepositoryPath):
         return True
     GitRepositoryLock.acquire()
@@ -335,8 +339,7 @@ def FormatPatch (
         CommentPosition    = None,
         CommentPath        = None,
         Prefix             = '',
-        CommentInReplyToId = None,
-        LargePatchLines    = 500
+        CommentInReplyToId = None
         ):
 
     HubRepo            = Context.HubRepo
@@ -368,6 +371,7 @@ def FormatPatch (
         FromAddress = '%s via TianoCore Webhook <webhook@tianocore.org>' % (HubPullRequest.user.login)
         HeaderInReplyToId = 'In-Reply-To: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0)
         HeaderMessageId   = 'Message-ID: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, PatchNumber)
+    GitRepositoryLock.acquire()
     Email = GitRepo.git.format_patch (
               '--stdout',
               '--no-numbered',
@@ -378,6 +382,7 @@ def FormatPatch (
               '--subject-prefix=%s][PATCH v%d %0*d/%d' % (HubRepo.name, PatchSeriesVersion, len(str(HubPullRequest.commits)), PatchNumber, HubPullRequest.commits),
               CommitRange
               )
+    GitRepositoryLock.release()
 
     #
     # Remove first line from format-patch that is not part of email and parse
@@ -477,7 +482,7 @@ def FormatPatch (
             # Insert comments into patch at CommentPosition + 1 lines after '@@ '
             #
             LineNumber = LineNumber + CommentPosition + 1
-            if PatchLines > LargePatchLines:
+            if PatchLines > Context.webhookconfiguration.LargePatchLines:
                 Body = QuoteCommentList (
                            Comments,
                            Before     = Body[0] + BeforeBody + ''.join(Body[1][:LineNumber]),
@@ -515,8 +520,7 @@ def FormatPatchSummary (
         ReviewId = None,
         ReviewComments = [],
         DeleteId = None,
-        ParentReviewId = None,
-        LargePatchLines = 500
+        ParentReviewId = None
         ):
 
     HubRepo            = Context.HubRepo
@@ -569,6 +573,7 @@ def FormatPatchSummary (
             HeaderInReplyToId = None
             HeaderMessageId   = 'Message-ID: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0)
     if HeaderInReplyToId:
+        GitRepositoryLock.acquire()
         Email = GitRepo.git.format_patch (
                   '--stdout',
                   '--cover-letter',
@@ -579,7 +584,9 @@ def FormatPatchSummary (
                   '--subject-prefix=%s][PATCH v%d' % (HubRepo.name, PatchSeriesVersion),
                   CommitRange
                   )
+        GitRepositoryLock.release()
     else:
+        GitRepositoryLock.acquire()
         Email = GitRepo.git.format_patch (
                   '--stdout',
                   '--cover-letter',
@@ -589,6 +596,7 @@ def FormatPatchSummary (
                   '--subject-prefix=%s][PATCH v%d' % (HubRepo.name, PatchSeriesVersion),
                   CommitRange
                   )
+        GitRepositoryLock.release()
 
     #
     # Remove first line from format-patch that is not part of email and parse
@@ -694,7 +702,9 @@ def FormatPatchSummary (
             #
             # Generate a quoted file diff for the commit range
             #
+            GitRepositoryLock.acquire()
             Diff = '\n-- \n' + GitRepo.git.diff (CommitRange)
+            GitRepositoryLock.release()
             Diff = QuoteText (''.join(Diff), '> ', 1)
             Diff = Diff.splitlines(keepends=True)
 
@@ -702,7 +712,7 @@ def FormatPatchSummary (
             # If diff is > LargePatchLines, then only keep diff lines associated
             # with the files mentioned in the comments
             #
-            if len(Diff) > LargePatchLines:
+            if len(Diff) > Context.webhookconfiguration.LargePatchLines:
                 NewDiff = []
                 for CommentPath in CommentDict:
                     Start  = '> diff --git a/' + CommentPath + ' b/' + CommentPath + '\n'

@@ -24,7 +24,7 @@
     <tr>
       <td>
         <a href="/config/logsrepo/{{ webhookconfiguration.id }}">
-          {{ webhookconfiguration.GithubOrgName }}/{{ webhookconfiguration.GithubRepoName }}
+          {{ webhookconfiguration.GithubRepo }}
         </a>
       </td>
       <td>{{ webhookconfiguration.EmailArchiveAddress }}</td>
@@ -35,7 +35,7 @@
         </form>
       </td>
       <td>
-        <form method="post" action="/config/deleterepo/{{ webhookconfiguration.id }}" onSubmit="return confirm('Are you sure you wish to delete {{ webhookconfiguration.GithubOrgName }}/{{ webhookconfiguration.GithubRepoName }}?');">
+        <form method="post" action="/config/deleterepo/{{ webhookconfiguration.id }}" onSubmit="return confirm('Are you sure you wish to delete {{ webhookconfiguration.GithubRepo }}?');">
           <input type="submit" value="Delete" name="delete"/>
         </form>
       </td>

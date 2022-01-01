@@ -183,7 +183,7 @@ def create_app():
     @app.route('/webhook/<OrgName>/<RepoName>', methods=['POST'])
     def webhook(OrgName, RepoName):
         try:
-            webhookconfiguration = WebhookConfiguration.query.filter_by(GithubOrgName = OrgName, GithubRepoName = RepoName).first()
+            webhookconfiguration = WebhookConfiguration.query.filter_by(GithubRepo = OrgName + '/' + RepoName).first()
         except:
             abort(400, 'Unsupported repo')
         if not webhookconfiguration:

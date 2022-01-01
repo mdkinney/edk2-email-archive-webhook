@@ -93,9 +93,9 @@ class WebhookConfiguration(db.Model):
     __tablename__ = 'webhook_configuration'
     id = db.Column(db.Integer, primary_key=True)
     #
-    # The name of the GitHub origanization that hosts the repo for the webhook
+    # The name of the GitHub repo for the webhook of the for OrgName/RepoName
     #
-    GithubOrgName         = db.Column(db.String)
+    GithubRepo            = db.Column(db.String, unique=True)
     #
     # GITHUB_TOKEN - 40 character hex string that is a Personal Access Token
     # created in GitHub in User->Settings->Developer Settings->Personal access tokens.
@@ -110,12 +110,8 @@ class WebhookConfiguration(db.Model):
     #
     GithubToken         = db.Column(db.String)
     #
-    # The name of the GitHub repo for the webhook
-    #
-    GithubRepoName        = db.Column(db.String)
-    #
     # GITHUB_WEBHOOK_SECRET - 64 character hex string that is secret used to
-    # validate payloads received from GitHub.  If this envirionment variable is not
+    # validate payloads received from GitHub.  If this environment variable is not
     # set correctly, then all payloads from GitHub are rejected. This value
     # must match the GitHub repository setting  in Settings->WebHooks->Edit->Secret.
     # Scope to a single repository.
@@ -131,8 +127,18 @@ class WebhookConfiguration(db.Model):
     # by this webhook service and for the emails to be archived.
     #
     EmailArchiveAddress = db.Column(db.String)
-
+    # Set to True to enable sending emails to EmailArchiveList
+    # Set to False to disable sending emails to EmailArchiveList
     SendEmail           = db.Column(db.Boolean)
+    # Set to the maximum number of lines in a patch to send the entire patch
+    # when a comment is made.  If the patch is larger than this number of lines
+    # then only the specific file the comment is against will be added to the
+    #  email.
+    LargePatchLines     = db.Column(db.Integer)
+    # Path to Maintainers.txt in the repository.  Default is Maintainters.txt
+    # in the root of the repository.
+    MaintainersTxtPath  = db.Column(db.String)
+    # The children of this object model are a list of Github POST events
     children            = db.relationship(lambda: WebhookEventLog)
 
     def AddEventEntry (self):

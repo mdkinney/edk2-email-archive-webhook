@@ -68,18 +68,20 @@ and code review activities.
 
 * Implement unit tests
 
+* Use RabbitMQ to queue requests for each repo and to queue emails for sending.
+  + Use message queue for received requests
+  + Use message queue to send emails
+
+* Clean up SQLAlchemy database so deleted logs reduce database file size.
+
 * Change WebhookContext to a class with methods to remove passing Context
   parameter.
-
-* See if Maintainer.txt can be directly downloaded from GitHub instead of
-  cloning entire branch with depth 0.  May be faster.  Also measure time
-  required to checkout a single PR
 
 * Logs - Show list of events. Hyperlink to list of logs for that event
   Event should provide date/time/event/action.
 
 * Update lock around git operations to support a different lock for each repo.
-  And use of lock around all git operations.  Consider returning list of files
+  And use of lock around all git operations. Consider returning list of files
   modified and set of formatted patches from the Fetch() method.
 
   See if order of operations can be changed to collect all information required
@@ -91,13 +93,9 @@ and code review activities.
   + Diff required for emails
   + send email contents with formatting
 
-* fetch repo base.ref. Default depth is 200. Since the only file needed for
-  processing is Maintainers.txt, can likely use Depth = 1.
-
-  Changed default to Depth=1.  Need to do more testing.
-
-  Only used to get Maintainers.txt.  See other task to get Maintainers.txt
-  directly from github without using git.
+* Handle corner case if git repo is deleted or corrupted between the time it was
+  fetched and the time it was used for patch email/diff operations.  Would be
+  better if all these operations occurred at one time.
 
 * Update database to auto update if fields or models are added/removed/renamed.
 
@@ -105,20 +103,12 @@ and code review activities.
   should generate emails against all PRs with that same commit.  Also include
   same commit SHA in other repos and make sure those other repos are ignored.
 
-* Clean up SQLAlchemy database so deleted logs reduce database file size.
-
-* Use message queue for received requests
-
-* Use message queue to send emails
-
 * Review what happens when the PR is an update to Maintainers.txt. Need old
   and new maintainer/reviewer to review the change unless the old maintainer
   is not longer active.  Must have new maintainer review to accept new role
 
 * If Maintainers.txt is updated to add/remove maintainers/reviewers, then the
   GitHub repository maintainers/reviewers also needs to be updated.
-
-* Combination of GitHub org and GitHub repo must be unique.
 
 * Auto clear log entries older than 30 days.
 
@@ -132,6 +122,30 @@ and code review activities.
   same result.
 
 ## Completed Tasks
+
+* DONE 1-1-2022 - Make path to maintainers.txt configurable.
+
+* DONE 12-31-2021 - Combination of GitHub org and GitHub repo must be unique.
+
+* DONE 12-31-2021 - See if Maintainer.txt can be directly downloaded from GitHub
+  instead of cloning entire branch with depth 0.  May be faster.  Also measure
+  time required to checkout a single PR.  Event logs updated to include time
+  required for all git and file operations.
+
+* DONE 12-31-2021 - fetch repo base.ref. Default depth is 200. Since the only
+  file needed for processing is Maintainers.txt, can likely use Depth = 1.
+
+  Changed default to Depth=1.  Need to do more testing.
+
+  Only used to get Maintainers.txt.  See other task to get Maintainers.txt
+  directly from github without using git.
+
+  Code changed to directly read Maintainer.txt from GitHub as a raw file.
+      url = 'https://raw.githubusercontent.com/%s/%s/%s' % (
+        Context.HubPullRequest.base.repo.full_name,
+        Context.HubPullRequest.base.ref,
+        Context.webhookconfiguration.MaintainersTxtPath
+        )
 
 * DONE 12-31-2021 - Add WebhookContext object class with context for processing request.
   + app
@@ -163,7 +177,12 @@ and code review activities.
 
 * DONE 12-29-2021 - Add option to delete the repository cache
 
-* DONE 12-29-2021 - Add lock around all methods to perform GIT operations or file operations in Repository
+* DONE 12-29-2021 - Add lock around all methods to perform GIT operations
+  or file operations in Repository
+
+  Updated 1-1-2022 to add lock around patch email and diff operations.  Still has
+  corner case if git repo is deleted or corrupted between the time it was
+  fetched and the time it was used for patch email/diff operations.
 
 * DONE 12-23-2021 - Add support for SH256 auth of request header from GitHub
   Should we upgrade from SHA1 to SHA256 for GitHub Request HMAC auth? YES

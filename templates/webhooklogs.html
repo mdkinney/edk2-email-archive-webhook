@@ -3,10 +3,10 @@
 {% block content %}
 <a href={{ url_for('webhook_repos') }}>Repositories</a>
 <td>
-  <form method="post" action="/config/clearlogrepo/{{ webhookconfiguration.id }}" onSubmit="return confirm('Are you sure you wish to clear log {{ webhookconfiguration.GithubOrgName }}/{{ webhookconfiguration.GithubRepoName }}?');">
+  <form method="post" action="/config/clearlogrepo/{{ webhookconfiguration.id }}" onSubmit="return confirm('Are you sure you wish to clear log {{ webhookconfiguration.GithubRepo }}?');">
     <input type="submit" value="Clear Log" name="clearlog"/>
   </form>
-  <form method="post" action="/config/deletegitrepocache/{{ webhookconfiguration.id }}" onSubmit="return confirm('Are you sure you wish to delete git repository cache {{ webhookconfiguration.GithubOrgName }}/{{ webhookconfiguration.GithubRepoName }}?');">
+  <form method="post" action="/config/deletegitrepocache/{{ webhookconfiguration.id }}" onSubmit="return confirm('Are you sure you wish to delete git repository cache {{ webhookconfiguration.GithubRepo }}?');">
     <input type="submit" value="Delete Git Repository Cache" name="deletegitrepocache"/>
   </form>
 </td>
@@ -23,7 +23,7 @@
     </head>
     <body>
     <table>
-      <caption>{{ webhookconfiguration.GithubOrgName }}/{{ webhookconfiguration.GithubRepoName}}</caption>
+      <caption>{{ webhookconfiguration.GithubRepo }}</caption>
       <tr>
         <th>id</th>
         <th>Date</th>
