@@ -67,6 +67,7 @@ and code review activities.
 ## Todo List
 
 * Implement unit tests
+  + https://blog.miguelgrinberg.com/post/how-to-write-unit-tests-in-python-part-3-web-applications
 
 * Use RabbitMQ to queue requests for each repo and to queue emails for sending.
   + Use message queue for received requests
@@ -120,6 +121,13 @@ and code review activities.
   Need a better solution that guarantees that patch emails sent with
   complete patches (no comments) can be extracted and applied and get the
   same result.
+
+* Deploy as a production service
+
+  + https://blog.miguelgrinberg.com/post/flask-mega-tutorial-update-flask-2-0-and-more
+  + https://blog.miguelgrinberg.com/post/the-flask-mega-tutorial-part-xvii-deployment-on-linux
+
+
 
 ## Completed Tasks
 

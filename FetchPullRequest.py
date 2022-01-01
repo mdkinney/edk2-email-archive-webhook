@@ -114,12 +114,14 @@ def FetchPullRequest(Context):
         Message += 'Read file ' + url + '\n'
         StartTime = datetime.datetime.now()
         Response=requests.get(url)
+        Response.raise_for_status()
         Maintainers = Response.content.decode('utf-8')
         Message += '  SUCCESS:' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
     except:
         # If Maintainers.txt is not available, then return an error
         Message += '  FAIL   :' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
         Context.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (Context.HubPullRequest.number), Message)
+        GitRepositoryLock.release()
         return 200, 'ignore %s event because Maintainers.txt cannot be read from GitHub' % (Context.event)
 
     # Build list of commit SHA values and list of all maintainers/reviewers

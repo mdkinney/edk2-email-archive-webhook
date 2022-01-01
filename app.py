@@ -68,13 +68,13 @@ def create_app():
     def favicon():
         return send_from_directory(os.path.join(app.root_path, 'static'), 'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
-    @app.route('/config/listusers', methods=['GET', 'POST'])
+    @app.route('/config/listusers', methods=['GET'])
     @login_required
     def webhook_users():
         users = User.query.all()
         return render_template('webhooklistusers.html', users=users)
 
-    @app.route('/config/deleteuser/<id>', methods=['GET', 'POST'])
+    @app.route('/config/deleteuser/<id>', methods=['POST'])
     @login_required
     def webhook_deleteuser(id):
         if request.method == 'POST':
@@ -84,7 +84,7 @@ def create_app():
                 db.session.commit()
         return redirect('/config/listusers')
 
-    @app.route('/config/listrepos', methods=['GET', 'POST'])
+    @app.route('/config/listrepos', methods=['GET'])
     @login_required
     def webhook_repos():
         webhookconfigurations = WebhookConfiguration.query.all()
@@ -94,36 +94,36 @@ def create_app():
     @login_required
     def webhook_addrepo():
         form = WebhookConfigurationForm(request.form)
-        if request.method == 'GET':
-            return render_template('webhookaddrepo.html', form=form, title="Add Repository")
-        if request.method == 'POST' and form.validate_on_submit():
+        if request.method == 'POST':
             if 'home' in request.form:
                 return redirect('/')
             if 'cancel' in request.form:
                 return redirect('/config/listrepos')
-            webhookconfiguration = WebhookConfiguration()
-            form.populate_obj(webhookconfiguration)
-            db.session.add(webhookconfiguration)
-            db.session.commit()
+        if request.method == 'GET' or not form.validate_on_submit():
+            return render_template('webhookaddrepo.html', form=form, title="Add Repository")
+        webhookconfiguration = WebhookConfiguration()
+        form.populate_obj(webhookconfiguration)
+        db.session.add(webhookconfiguration)
+        db.session.commit()
         return redirect('/config/listrepos')
 
     @app.route('/config/updaterepo/<id>', methods=['GET', 'POST'])
     @login_required
     def webhook_updaterepo(id):
         webhookconfiguration = WebhookConfiguration.query.get_or_404(id)
-        form = WebhookConfigurationForm(obj=webhookconfiguration)
-        if request.method == 'GET':
-            return render_template('webhookaddrepo.html', form=form, title="Update Repository Settings")
-        if request.method == 'POST' and form.validate_on_submit():
+        form = WebhookConfigurationForm(webhookconfiguration.GithubRepo, obj=webhookconfiguration)
+        if request.method == 'POST':
             if 'home' in request.form:
                 return redirect('/')
             if 'cancel' in request.form:
                 return redirect('/config/listrepos')
-            form.populate_obj(webhookconfiguration)
-            db.session.commit()
+        if request.method == 'GET' or not form.validate_on_submit():
+            return render_template('webhookaddrepo.html', form=form, title="Update Repository Settings")
+        form.populate_obj(webhookconfiguration)
+        db.session.commit()
         return redirect('/config/listrepos')
 
-    @app.route('/config/deleterepo/<id>', methods=['GET', 'POST'])
+    @app.route('/config/deleterepo/<id>', methods=['POST'])
     @login_required
     def webhook_deleterepo(id):
         if request.method == 'POST':
