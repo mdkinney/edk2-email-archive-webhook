@@ -12,21 +12,14 @@ and code review activities.
 
 3) PIP install from requirements.txt
 
-4) Create 32 character SECRET_KEY for Flask (example creation and format)
+4) Copy config.py.template to config.py and fill in required settings.
 
-```
-    py
-    >>> import secrets
-    >>> print(secrets.token_urlsafe(32))
-    NHf3_djweYDyGwXPGXjQfwCK4L2tcLDPsRhMRbZ1D9Q
-```
+5) Create 32 character SECRET_KEY for Flask (example creation and format)
 
 ```
     py -c "import secrets; print(secrets.token_urlsafe(32))"
     NHf3_djweYDyGwXPGXjQfwCK4L2tcLDPsRhMRbZ1D9Q
 ```
-
-5) Copy config.py.template to config.py and fill in required settings.
 
 6) Create first administrator account using adduser.py
 
@@ -47,6 +40,11 @@ and code review activities.
      py -c "import secrets; print(secrets.token_hex(32))"
      ee6e0fa4f9e4fc255b1c1200f2444843d88c614393a5fdcd31b329626fe86643
 ```
+
+12) Add webhook to the repo in GitHub repo settings
+    * Fille in http link to webhook
+    * Fill in webhook secret created in (11)
+    * Set events to sent to webhook to TBD.  Use all for now.
 
 ## Development Mode
 
@@ -69,36 +67,58 @@ and code review activities.
 * Implement unit tests
   + https://blog.miguelgrinberg.com/post/how-to-write-unit-tests-in-python-part-3-web-applications
 
-* Use RabbitMQ to queue requests for each repo and to queue emails for sending.
-  + Use message queue for received requests
-  + Use message queue to send emails
+* Deploy as a production service
 
-* Clean up SQLAlchemy database so deleted logs reduce database file size.
+  + https://blog.miguelgrinberg.com/post/flask-mega-tutorial-update-flask-2-0-and-more
+  + https://blog.miguelgrinberg.com/post/the-flask-mega-tutorial-part-xvii-deployment-on-linux
 
 * Change WebhookContext to a class with methods to remove passing Context
   parameter.
 
 * Logs - Show list of events. Hyperlink to list of logs for that event
   Event should provide date/time/event/action.
+  + When in event view, show state of each event as a dynamic field.
+  + Consider using a tree view with list of events and if event is
+    expanded show list of log elements.  If log element is selected, then
+    show details of that log item in second column.
 
-* Update lock around git operations to support a different lock for each repo.
-  And use of lock around all git operations. Consider returning list of files
-  modified and set of formatted patches from the Fetch() method.
+* Make time period that logs are cleared configurable per repository
 
-  See if order of operations can be changed to collect all information required
+* Update database to auto update if fields or models are added/removed/renamed.
+
+* See if order of operations can be changed to collect all information required
   to perform all local git operations at same time making lock on repo directory
-  only one time.
+  only one time. Consider returning list of files modified and set of formatted
+  patches from the Fetch() method.
   + Init
   + fetch PR
   + list of files modified
   + Diff required for emails
   + send email contents with formatting
+  + As an alternative, evaluate if patch files and list of files modified and
+    summary of files modified across a PR can be retrieved directly from
+    GitHub without fetching the PR branch from the GitHub repository.  The
+    individual patches are available based on commit SHA and .diff or .patch
+    extension.  The list of files modified across entire PR and patch summary
+    need to be investigated. Would change how emails are generated to modify
+    the returned .patch files with different from, to, cc, subject lines to
+    exactly match what git format-patch does so patches can still be extracted
+    from emails and applied locally.
 
 * Handle corner case if git repo is deleted or corrupted between the time it was
   fetched and the time it was used for patch email/diff operations.  Would be
   better if all these operations occurred at one time.
 
-* Update database to auto update if fields or models are added/removed/renamed.
+* Add features to clean up queues to reduce disk space.
+  + On demand clean up by admin?
+  + Based on age of acked items?
+  + May take a long time to rebuild database.  If timed, do on weekend.
+
+* Consider using queues for log information instead of SQLAlchemy to better
+  support cleaning up database and reduce disk usage when logs older than
+  a specified time are cleared.
+
+* Clean up SQLAlchemy database so deleted logs reduce database file size.
 
 * Add test case with the same commits in more than one open PR. Commit_comments
   should generate emails against all PRs with that same commit.  Also include
@@ -122,14 +142,38 @@ and code review activities.
   complete patches (no comments) can be extracted and applied and get the
   same result.
 
-* Deploy as a production service
+* Determine minimum set of events to enable in GitHub to send to webhook
 
-  + https://blog.miguelgrinberg.com/post/flask-mega-tutorial-update-flask-2-0-and-more
-  + https://blog.miguelgrinberg.com/post/the-flask-mega-tutorial-part-xvii-deployment-on-linux
-
-
+* See if it makes sense to convert webhook to GitHub Application that can
+  be installed in organizations for a selection of repositories.  Should
+  simplify the configuration of each repo using GitHub App auth features.
 
 ## Completed Tasks
+
+* DONE 1-6-2021 - Use persist-queue to queue requests for each repo and to queue
+  emails for sending.
+  + Use message queue for received requests per repo
+  + Use message queue to send emails
+  + UniqueAckQ with uses SQLite looks like the best option to support retries
+    after a restart of the service.  The Unique feature helps prevent the same
+    email from being sent more than 1 time by checking if the same blob has
+    already been queued.  Add timestamp to GitHub POST request blob that is
+    queued per repo so a GithUb POST request can be resent and be unique so
+    it will be retried.
+
+* DONE 1-6-2021 - Update lock around git operations to support a different lock
+  for each repo. And use of lock around all git operations.
+
+* DONE 1-6-2021 - Move clear logs at repo scope to a queued operation.
+
+* DONE 1-6-2021 - Add reset statistics button.  Immediate or queued operation?
+  Immediate seems safe.
+
+* DONE 1-6-2021 - Make statistics persistent across service restarts
+
+* DONE 1-6-2021 - Add statistic for number of times service has been restarted
+
+* DONE 1-6-2021 - Add statistic for number of times service has been upgraded
 
 * DONE 1-1-2022 - Make path to maintainers.txt configurable.
 
@@ -188,7 +232,7 @@ and code review activities.
 * DONE 12-29-2021 - Add lock around all methods to perform GIT operations
   or file operations in Repository
 
-  Updated 1-1-2022 to add lock around patch email and diff operations.  Still has
+  Updated 1-1-2022 to add lock around patch email and diff operations. Still has
   corner case if git repo is deleted or corrupted between the time it was
   fetched and the time it was used for patch email/diff operations.
 

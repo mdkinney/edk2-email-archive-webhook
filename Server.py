@@ -14,14 +14,16 @@ from __future__ import print_function
 
 import sys
 import hmac
-import datetime
+import time
+from datetime import datetime
 from json import dumps
 from flask import request, abort
 from github import Github
 from GetMaintainers import GetMaintainers, ParseMaintainerAddresses
 from SendEmails import SendEmails
-from FetchPullRequest import FetchPullRequest, FormatPatch, FormatPatchSummary
-from Models import LogTypeEnum
+from FetchPullRequest import FetchPullRequest, FormatPatch, FormatPatchSummary, DeleteRepositoryCache
+from Models import LogTypeEnum, WebhookStatistics, db
+import Globals
 
 REVIEW_REQUEST     = '[CodeReview] Review-request @'
 REVIEWED_BY        = '[CodeReview] Reviewed-by'
@@ -215,17 +217,18 @@ def VerifyPayload(Context):
     # Skip requests that are not for the configured repository
     if payload['repository']['full_name'] != Context.webhookconfiguration.GithubRepo:
         return 200, 'ignore event %s for incorrect repository %s' % (Context.event, payload['repository']['full_name'])
-    # Retrieve Hub object for this repo
-    try:
-        Context.Hub = Github (Context.webhookconfiguration.GithubToken)
-    except:
-        abort(400, 'Unable to retrieve Hub object using GITHUB_TOKEN')
     # Update Context structure
     Context.action  = payload['action']
     Context.payload = payload
     return 0, ''
 
 def VerifyPullRequest(Context, Issue = None):
+    # Retrieve Hub object for this repo
+    if not Context.Hub:
+        try:
+            Context.Hub = Github (Context.webhookconfiguration.GithubToken)
+        except:
+            return 200, 'Unable to retrieve Hub object using GITHUB_TOKEN'
     # Use GitHub API to get the Repo and Pull Request objects
     HubRepo        = None
     HubPullRequest = None
@@ -267,7 +270,12 @@ def VerifyPullRequest(Context, Issue = None):
     Context.HubPullRequest     = HubPullRequest
     # Fetch the git commits for the pull request and return a git repo
     # object and the contents of Maintainers.txt
-    Status, Message = FetchPullRequest (Context)
+    for Retry in range (1, 3):
+        Status, Message = FetchPullRequest (Context)
+        if not Status:
+            break
+        print ('Error in FetchPullRequest().  Sleep 1 second and retry')
+        time.sleep(1)
     if Status:
         return Status, Message
     # Determine if this is a new patch series and the version of the patch series
@@ -307,8 +315,8 @@ def ProcessIssueComment(Context):
     if Context.action == 'edited':
         # The delta time is the number of seconds from the time the comment
         # was created to the time the comment was edited
-        UpdatedAt = datetime.datetime.strptime(Context.payload['comment']['updated_at'], "%Y-%m-%dT%H:%M:%SZ")
-        CreatedAt = datetime.datetime.strptime(Context.payload['comment']['created_at'], "%Y-%m-%dT%H:%M:%SZ")
+        UpdatedAt = datetime.strptime(Context.payload['comment']['updated_at'], "%Y-%m-%dT%H:%M:%SZ")
+        CreatedAt = datetime.strptime(Context.payload['comment']['created_at'], "%Y-%m-%dT%H:%M:%SZ")
         UpdateDeltaTime = (UpdatedAt - CreatedAt).seconds
     if Context.action == 'deleted':
         UpdateDeltaTime = -1
@@ -319,8 +327,16 @@ def ProcessIssueComment(Context):
                   Prefix          = '> ',
                   UpdateDeltaTime = UpdateDeltaTime
                   )
-    # Send generated emails
-    SendEmails (Context, [Summary])
+    # Release the local git repository
+    Context.GitRepo.__del__()
+    # Queue sending of generated emails
+    Globals.GetEmailQueue().put ((
+        Context.eventlog.id,
+        Context.webhookconfiguration.id,
+        Context.HubPullRequest.user.login,
+        Context.HubPullRequest.number,
+        [Summary]
+        ))
     return 200, 'successfully processed %s event with action %s' % (Context.event, Context.action)
 
 def ProcessCommitComment(Context):
@@ -353,8 +369,16 @@ def ProcessCommitComment(Context):
     # Check to make sure there is at least 1 email generated
     if EmailContents == []:
         return 200, 'ignore %s event with action %s for which there are no matching issues' % (Context.event, Context.action)
-    # Send generated emails
-    SendEmails (Context, EmailContents)
+    # Release the local git repository
+    Context.GitRepo.__del__()
+    # Queue sending of generated emails
+    Globals.GetEmailQueue().put ((
+        Context.eventlog.id,
+        Context.webhookconfiguration.id,
+        Context.HubPullRequest.user.login,
+        Context.HubPullRequest.number,
+        EmailContents
+        ))
     return 200, 'successfully processed %s event with action %s' % (Context.event, Context.action)
 
 def ProcessPullRequestReview(Context):
@@ -397,7 +421,7 @@ def ProcessPullRequestReview(Context):
                         if ParentReviewId and ParentReviewId != ReviewId:
                             break
         if Context.action == 'edited' and Review:
-            UpdatedAt = datetime.datetime.strptime(Context.payload['pull_request']['updated_at'], "%Y-%m-%dT%H:%M:%SZ")
+            UpdatedAt = datetime.strptime(Context.payload['pull_request']['updated_at'], "%Y-%m-%dT%H:%M:%SZ")
             UpdateDeltaTime = (UpdatedAt - Review.submitted_at).seconds
     if Context.event in ['pull_request_review_comment']:
         CommentId          = Context.payload['comment']['id']
@@ -419,7 +443,7 @@ def ProcessPullRequestReview(Context):
             UpdateDeltaTime = 0
             DeleteId = Context.payload['comment']['id']
         if Context.action == 'edited' and Review:
-            UpdatedAt = datetime.datetime.strptime(Context.payload['comment']['updated_at'], "%Y-%m-%dT%H:%M:%SZ")
+            UpdatedAt = datetime.strptime(Context.payload['comment']['updated_at'], "%Y-%m-%dT%H:%M:%SZ")
             UpdateDeltaTime = (UpdatedAt - Review.submitted_at).seconds
 
     Email = FormatPatchSummary (
@@ -437,8 +461,16 @@ def ProcessPullRequestReview(Context):
                 DeleteId           = DeleteId,
                 ParentReviewId     = ParentReviewId
                 )
-    # Send any generated emails
-    SendEmails (Context, [Email])
+    # Release the local git repository
+    Context.GitRepo.__del__()
+    # Queue sending of generated emails
+    Globals.GetEmailQueue().put ((
+        Context.eventlog.id,
+        Context.webhookconfiguration.id,
+        Context.HubPullRequest.user.login,
+        Context.HubPullRequest.number,
+        [Email]
+        ))
     return 200, 'successfully processed %s event with action %s' % (Context.event, Context.action)
 
 def ProcessPullRequest(Context):
@@ -473,9 +505,58 @@ def ProcessPullRequest(Context):
             UpdateDeltaTime = (Context.HubPullRequest.updated_at - Context.HubPullRequest.created_at).seconds
         Summary = FormatPatchSummary (Context, UpdateDeltaTime = UpdateDeltaTime)
         EmailContents.insert (0, Summary)
-    # Send generated emails
-    SendEmails (Context, EmailContents)
+    # Release the local git repository
+    Context.GitRepo.__del__()
+    # Queue sending of generated emails
+    Globals.GetEmailQueue().put ((
+        Context.eventlog.id,
+        Context.webhookconfiguration.id,
+        Context.HubPullRequest.user.login,
+        Context.HubPullRequest.number,
+        EmailContents
+        ))
     return 200, 'successfully processed %s event with action %s' % (Context.event, Context.action)
+
+def DispatchGithubRequest (Context):
+    try:
+        if Context.event=='CUSTOM' and Context.action=='DeleteRepositoryCache':
+            return DeleteRepositoryCache (Context)
+        if Context.event=='CUSTOM' and Context.action=='ClearLogs':
+            for log in Context.webhookconfiguration.children:
+                # Do not delete log entries for ClearLogs request
+                if log == Context.eventlog:
+                    continue
+                # Do not delete log entries that were created after the
+                # ClearLogs request
+                if log.TimeStamp > Context.eventlog.TimeStamp:
+                    continue
+                for child in log.children:
+                    db.session.delete(child)
+                db.session.delete(log)
+            db.session.commit()
+            return 200, 'successfully processed %s event with action %s' % (Context.event, Context.action)
+        if Context.event == 'issue_comment':
+            return ProcessIssueComment(Context)
+        if Context.event == 'commit_comment':
+            return ProcessCommitComment(Context)
+        if Context.event == 'pull_request_review':
+            return ProcessPullRequestReview(Context)
+        if Context.event == 'pull_request_review_comment':
+            return ProcessPullRequestReview(Context.event)
+        if Context.event == 'pull_request':
+            return ProcessPullRequest(Context)
+    except:
+        raise
+        return 200, 'exception dispatching event %s with action %s' % (Context.event, Context.action)
+    return 200, 'ignore unsupported event %s with action %s' % (Context.event, Context.action)
+
+def QueueGithubRequest(Context):
+    # Add request to the repository queue
+    Globals.GetRepositoryQueue(Context.webhookconfiguration.GithubRepo).put (
+        (Context.eventlog.id, Context.event, Context.action, Context.payload, datetime.now())
+        )
+    WebhookStatistics.query.all()[0].RequestQueued()
+    return 202, 'Event %s with action %s queued for processing' % (Context.event, Context.action)
 
 def ProcessGithubRequest(Context):
     # Authenticate the request header.
@@ -492,7 +573,7 @@ def ProcessGithubRequest(Context):
             return 200, 'ignore %s event with action %s. Only created, edited, and deleted are supported.' % (Context.event, Context.action)
         if 'pull_request' not in Context.payload['issue']:
             return 200, 'ignore %s event without an associated pull request' % (Context.event)
-        return ProcessIssueComment(Context)
+        return QueueGithubRequest (Context)
     # Process commit_comment events
     # These are comments against a specific commit
     # Quote Patch #n commit message and add comment below below with commenters GitHubID
@@ -506,7 +587,7 @@ def ProcessGithubRequest(Context):
         for Line in Context.payload['comment']['body'].splitlines():
             if Line.startswith (REVIEW_REQUEST):
                 return 200, 'ignore %s event with REVIEW_REQUEST body generated by this webhook' % (Context.event)
-        return ProcessCommitComment(Context)
+        return QueueGithubRequest (Context)
     # Process pull_request_review events
     # Quote Patch #0 commit message and patch diff of file comment is against
     if Context.event == 'pull_request_review':
@@ -514,7 +595,7 @@ def ProcessGithubRequest(Context):
             return 200, 'ignore %s event with action %s. Only submitted and deleted are supported.' % (Context.event, Context.action)
         if Context.action == 'edited' and Context.payload['changes'] == {}:
             return 200, 'ignore %s event with action %s that has no changes.' % (Context.event, Context.action)
-        return ProcessPullRequestReview(Context)
+        return QueueGithubRequest (Context)
     # Process pull_request_review_comment events
     # Quote Patch #0 commit message and patch diff of file comment is against
     if Context.event == 'pull_request_review_comment':
@@ -527,10 +608,10 @@ def ProcessGithubRequest(Context):
         for Line in Context.payload['comment']['body'].splitlines():
             if Line.startswith (REVIEW_REQUEST):
                 return 200, 'ignore %s event with REVIEW_REQUEST body generated by this webhook' % (Context.event)
-        return ProcessPullRequestReview(Context.event)
+        return QueueGithubRequest (Context)
     # Process pull_request events
     if Context.event == 'pull_request':
         if Context.action not in ['opened', 'synchronize', 'edited', 'closed', 'reopened', 'ready_for_review']:
             return 200, 'ignore %s event with action %s. Only opened, synchronize, edited, closed, reopened, and ready_for_review are supported.' % (Context.event, Context.action)
-        return ProcessPullRequest(Context)
+        return QueueGithubRequest (Context)
     return 200, 'ignore unsupported event %s with action %s' % (Context.event, Context.action)

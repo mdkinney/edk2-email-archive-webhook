@@ -10,8 +10,9 @@ adduser
 '''
 import sys
 import argparse
-import datetime
-from app import create_app, db, User
+from datetime import datetime
+from app import create_app
+from Models import db, User
 
 #
 # Globals for help information
@@ -59,7 +60,7 @@ if __name__ == '__main__':
             try:
                 db.session.add (
                     User(username=args.username, active=True, email=args.email,
-                        password=hash, email_confirmed_at=datetime.datetime.now(),
+                        password=hash, email_confirmed_at=datetime.now(),
                         first_name=args.firstname, last_name=args.lastname
                         )
                     )
@@ -68,6 +69,7 @@ if __name__ == '__main__':
             except:
                 print ('adduser: Error adding Username {} to the user database.  Email must be unique'.format (args.username))
                 db.session.rollback()
+                db.session.commit()
         print ('User List:')
         for user in User.query.all():
-          print ('  ', user.username)
+            print ('  ', user.username)

@@ -14,14 +14,15 @@ import os
 import time
 import email
 import smtplib
-from Models import LogTypeEnum
+from Models import LogTypeEnum, WebhookStatistics
+import Globals
 
 def ParseEmailAddress(Address):
     EmailAddress = Address.rsplit('<',1)[1].split('>',1)[0].strip()
     EmailName    = (Address.rsplit('<',1)[0] + Address.rsplit('>')[1]).strip()
     return EmailAddress, EmailName
 
-def SendEmails (Context, EmailContents):
+def SendEmails (Context, EmailContents, PrUserLogin = '', PrNumber = 0):
     try:
         if Context.webhookconfiguration.SendEmail:
             #
@@ -39,10 +40,10 @@ def SendEmails (Context, EmailContents):
                     FromAddress, FromName = ParseEmailAddress(EmailMessage['From'])
                 except:
                     FromAddress = 'webhook@tianocore.org'
-                    FromName    = 'From %s via TianoCore Webhook' % (Context.HubPullRequest.user.login)
+                    FromName    = 'From %s via TianoCore Webhook' % (PrUserLogin)
             else:
                 FromAddress = 'webhook@tianocore.org'
-                FromName    = 'From %s via TianoCore Webhook' % (Context.HubPullRequest.user.login)
+                FromName    = 'From %s via TianoCore Webhook' % (PrUserLogin)
             ToList = []
             if 'To' in EmailMessage:
                 for Address in EmailMessage['To'].split(','):
@@ -62,12 +63,16 @@ def SendEmails (Context, EmailContents):
                         ToList.append(EmailAddress.lower())
                     except:
                         continue
-            Context.eventlog.AddLogEntry (LogTypeEnum.Email, 'pr[%d] email[%d]' % (Context.HubPullRequest.number, Index), Email)
+            Context.eventlog.AddLogEntry (LogTypeEnum.Email, 'pr[%d] email[%d]' % (PrNumber, Index), Email)
             if Context.webhookconfiguration.SendEmail:
                 try:
                     SmtpServer.sendmail(FromAddress, ToList, Email)
+                    WebhookStatistics.query.all()[0].EmailSent()
                 except:
-                    Context.eventlog.AddLogEntry (LogTypeEnum.Email, 'pr[%d] email[%d]' % (Context.HubPullRequest.number, Index), 'SMTP ERROR: Send message failed')
+                    Context.eventlog.AddLogEntry (LogTypeEnum.Email, 'pr[%d] email[%d]' % (PrNumber, Index), 'SMTP ERROR: Send message failed')
+                    WebhookStatistics.query.all()[0].EmailFailed()
+            else:
+                WebhookStatistics.query.all()[0].EmailSent()
             Index = Index + 1
         if Context.webhookconfiguration.SendEmail:
             SmtpServer.quit()

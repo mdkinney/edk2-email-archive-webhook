@@ -9,14 +9,64 @@
     padding: 5px;
   }
   </style>
-  </head>
+  <meta http-equiv="refresh" content="5">
+</head>
 <body>
-<table>
+  <form method="post" action="/config/resetstatistics" onSubmit="return confirm('Are you sure you wish to reset statistics?');">
+    <input type="submit" value="Reset Statistics" name="resetstatistics"/>
+  </form>
+
+  <table>
+    <caption>Service</caption>
+    <tr>
+      <td>Upgrades</td>
+      <td>Last Upgrade</td>
+      <td>Restarts</td>
+      <td>Up Time</td>
+    </tr>
+    <tr>
+      <td>{{ NumberOfUpgrades }}</td>
+      <td>{{ LastUpgradeTime }}</td>
+      <td>{{ NumberOfRestarts }}</td>
+      <td>{{ ServiceUpTime }}</td>
+    </tr>
+  </table>
+
+  <table>
+    <caption>Github Requests</caption>
+    <tr>
+      <td>Requests</td>
+      <td>Queued</td>
+      <td>Processed</td>
+    </tr>
+    <tr>
+      <td>{{ GitHubRequestsReceived }}</td>
+      <td>{{ GitHubRequestsQueued }}</td>
+      <td>{{ GitHubRequestsProcessed }}</td>
+    </tr>
+  </table>
+
+  <table>
+    <caption>Emails</caption>
+    <tr>
+      <td>Sent</td>
+      <td>Failed</td>
+      <td>Queue Depth</td>
+    </tr>
+    <tr>
+      <td>{{ EmailsSent }}</td>
+      <td>{{ EmailsFailed }}</td>
+      <td>{{ EmailQueueDepth }}</td>
+    </tr>
+  </table>
+
+  <table>
   <caption>Repositories [<a href={{ url_for('webhook_addrepo') }}>Add Repository</a>]</caption>
   <tr>
     <th>Repository</th>
     <th>Email Archive Address</th>
     <th>Send Email</th>
+    <th>Queue Depth</th>
     <th>Action</th>
     <th>Action</th>
   </tr>
@@ -29,6 +79,7 @@
       </td>
       <td>{{ webhookconfiguration.EmailArchiveAddress }}</td>
       <td>{{ webhookconfiguration.SendEmail }}</td>
+      <td>{{ webhookconfiguration.QueueDepth }}</td>
       <td>
         <form method="get" action="/config/updaterepo/{{ webhookconfiguration.id }}">
           <input type="submit" value="Settings" name="settings"/>

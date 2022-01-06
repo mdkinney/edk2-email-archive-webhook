@@ -11,7 +11,7 @@ TianoCore Code Review Archive Service Flask Models
 
 import re
 import enum
-import datetime
+from datetime import datetime
 from flask_sqlalchemy import SQLAlchemy
 from flask_user import UserManager, UserMixin
 from wtforms import ValidationError
@@ -60,31 +60,32 @@ class LogTypeEnum(enum.Enum):
   Email = 3
   Message = 4
   Payload = 5
+  Finished = 6
 
 class WebhookLog(db.Model):
     __tablename__ = 'webhook_log'
-    id = db.Column(db.Integer, primary_key=True)
-    parent_id = db.Column(db.Integer, db.ForeignKey('webhook_event_log.id'))
-    TimeStamp = db.Column(db.DateTime())
-    Type = db.Column(db.Enum(LogTypeEnum))
-    SubType = db.Column(db.String())
-    Text = db.Column(db.Text())
+    id            = db.Column(db.Integer, primary_key=True)
+    parent_id     = db.Column(db.Integer, db.ForeignKey('webhook_event_log.id'))
+    TimeStamp     = db.Column(db.DateTime())
+    Type          = db.Column(db.Enum(LogTypeEnum))
+    SubType       = db.Column(db.String())
+    Text          = db.Column(db.Text())
 
 class WebhookEventLog(db.Model):
     __tablename__ = 'webhook_event_log'
-    id = db.Column(db.Integer, primary_key=True)
-    parent_id = db.Column(db.Integer, db.ForeignKey('webhook_configuration.id'))
-    TimeStamp = db.Column(db.DateTime())
-    Event = db.Column(db.Text())
-    children            = db.relationship(lambda: WebhookLog)
+    id            = db.Column(db.Integer, primary_key=True)
+    parent_id     = db.Column(db.Integer, db.ForeignKey('webhook_configuration.id'))
+    TimeStamp     = db.Column(db.DateTime())
+    children      = db.relationship(lambda: WebhookLog)
 
     def AddLogEntry (self, Type, SubType, Text):
-        entry = WebhookLog()
-        entry.TimeStamp = datetime.datetime.now()
-        entry.Type = Type
-        entry.SubType = SubType
-        entry.Text = Text
+        entry           = WebhookLog()
+        entry.TimeStamp = datetime.now()
+        entry.Type      = Type
+        entry.SubType   = SubType
+        entry.Text      = Text
         db.session.add(entry)
+        db.session.commit()
         self.children.append (entry)
         db.session.commit()
         return entry
@@ -142,8 +143,87 @@ class WebhookConfiguration(db.Model):
     children            = db.relationship(lambda: WebhookEventLog)
 
     def AddEventEntry (self):
-        entry = WebhookEventLog()
+        entry           = WebhookEventLog()
+        entry.TimeStamp = datetime.now()
         db.session.add(entry)
+        db.session.commit()
         self.children.append (entry)
         db.session.commit()
         return entry
+
+class WebhookStatistics(db.Model):
+    __tablename__           = 'webhook_statistics'
+    id                      = db.Column(db.Integer, primary_key=True)
+    LastUpgradeTimeStamp    = db.Column(db.DateTime())
+    LastRestartTimeStamp    = db.Column(db.DateTime())
+    LastUpdateTimeStamp     = db.Column(db.DateTime())
+    LastResetTimeStamp      = db.Column(db.DateTime())
+    LastUpgradeVersion      = db.Column(db.String())
+    NumberOfUpgrades        = db.Column(db.Integer)
+    NumberOfRestarts        = db.Column(db.Integer)
+    EmailsSent              = db.Column(db.Integer)
+    EmailsFailed            = db.Column(db.Integer)
+    GitHubRequestsReceived  = db.Column(db.Integer)
+    GitHubRequestsQueued    = db.Column(db.Integer)
+    GitHubRequestsProcessed = db.Column(db.Integer)
+
+    def __init__(self):
+        self.LastUpgradeTimeStamp    = datetime.now()
+        self.LastRestartTimeStamp    = datetime.now()
+        self.LastUpdateTimeStamp     = datetime.now()
+        self.LastResetTimeStamp      = datetime.now()
+        self.LastUpgradeVersion      = ''
+        self.NumberOfUpgrades        = 0
+        self.NumberOfRestarts        = 0
+        self.EmailsSent              = 0
+        self.EmailsFailed            = 0
+        self.GitHubRequestsReceived  = 0
+        self.GitHubRequestsQueued    = 0
+        self.GitHubRequestsProcessed = 0
+        db.session.add(self)
+        db.session.commit()
+
+    def RestartService (self, ApplicationNameAndVersion):
+        self.LastRestartTimeStamp    = datetime.now()
+        self.NumberOfRestarts       += 1
+        if self.LastUpgradeVersion != ApplicationNameAndVersion:
+            self.LastUpgradeTimeStamp    = datetime.now()
+            self.LastUpgradeVersion      = ApplicationNameAndVersion
+            self.NumberOfUpgrades       += 1
+            self.NumberOfRestarts        = 0
+        db.session.commit()
+
+    def ResetStatistics (self):
+        self.LastUpdateTimeStamp     = datetime.now()
+        self.LastResetTimeStamp      = datetime.now()
+        self.EmailsSent              = 0
+        self.EmailsFailed            = 0
+        self.GitHubRequestsReceived  = 0
+        self.GitHubRequestsQueued    = 0
+        self.GitHubRequestsProcessed = 0
+        db.session.commit()
+
+    def EmailFailed (self):
+        self.LastUpdateTimeStamp      = datetime.now()
+        self.EmailsFailed            += 1
+        db.session.commit()
+
+    def EmailSent (self):
+        self.LastUpdateTimeStamp      = datetime.now()
+        self.EmailsSent              += 1
+        db.session.commit()
+
+    def RequestReceived (self):
+        self.LastUpdateTimeStamp      = datetime.now()
+        self.GitHubRequestsReceived  += 1
+        db.session.commit()
+
+    def RequestQueued (self):
+        self.LastUpdateTimeStamp      = datetime.now()
+        self.GitHubRequestsQueued    += 1
+        db.session.commit()
+
+    def RequestProcessed (self):
+        self.LastUpdateTimeStamp      = datetime.now()
+        self.GitHubRequestsProcessed += 1
+        db.session.commit()

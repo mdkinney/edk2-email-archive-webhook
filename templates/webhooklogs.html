@@ -1,6 +1,9 @@
 {% extends "flask_user_layout.html" %}
 
 {% block content %}
+<head>
+  <meta http-equiv="refresh" content="5">
+</head>
 <a href={{ url_for('webhook_repos') }}>Repositories</a>
 <td>
   <form method="post" action="/config/clearlogrepo/{{ webhookconfiguration.id }}" onSubmit="return confirm('Are you sure you wish to clear log {{ webhookconfiguration.GithubRepo }}?');">

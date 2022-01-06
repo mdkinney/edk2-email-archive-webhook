@@ -17,13 +17,11 @@ import textwrap
 import threading
 import shutil
 import stat
-import datetime
 import requests
-from collections import OrderedDict
+from datetime import datetime
 from Models import LogTypeEnum
 from GetMaintainers import GetMaintainers, ParseMaintainerAddresses
-
-GitRepositoryLock = threading.Lock()
+import Globals
 
 class Progress(git.remote.RemoteProgress):
     def __init__(self):
@@ -37,47 +35,59 @@ def FetchPullRequest(Context):
     # Fetch the base.ref branch and current PR branch from the base repository
     # of the pull request
     #
-    GitRepositoryLock.acquire()
+    Globals.AcquireRepositoryLock(Context.webhookconfiguration.GithubRepo)
     Message = ''
     RepositoryPath = os.path.normpath (os.path.join ('Repository', Context.HubPullRequest.base.repo.full_name))
-    if os.path.exists (RepositoryPath):
+    if not os.path.exists (RepositoryPath):
         try:
-            Message += 'mount local repository %s\n' % (RepositoryPath)
-            StartTime = datetime.datetime.now()
-            GitRepo = git.Repo(RepositoryPath)
-            Origin = GitRepo.remotes['origin']
-            Message += '  SUCCESS:' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
-        except:
-            try:
-                Message += 'create local repository %s\n' % (RepositoryPath)
-                StartTime = datetime.datetime.now()
-                GitRepo = git.Repo.init (RepositoryPath, bare=True)
-                Origin = GitRepo.create_remote ('origin', Context.HubPullRequest.base.repo.html_url)
-                Message += '  SUCCESS:' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
-            except:
-                Message += '  FAIL   :' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
-                Context.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (Context.HubPullRequest.number), Message)
-                GitRepositoryLock.release()
-                return 200, 'ignore %s event because local repository and remote can not be initialized' % (Context.event)
-    else:
-        try:
-            Message += 'create local repository %s\n' % (RepositoryPath)
-            StartTime = datetime.datetime.now()
+            Message += 'create directory local repository %s\n' % (RepositoryPath)
+            StartTime = datetime.now()
             os.makedirs (RepositoryPath)
-            GitRepo = git.Repo.init (RepositoryPath, bare=True)
-            Origin = GitRepo.create_remote ('origin', Context.HubPullRequest.base.repo.html_url)
-            Message += '  SUCCESS:' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
+            Message += '  SUCCESS:' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
         except:
-            Message += '  FAIL   :' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
+            Message += '  FAIL   :' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
             Context.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (Context.HubPullRequest.number), Message)
-            GitRepositoryLock.release()
-            return 200, 'ignore %s event because local repository and remote can not be initialized' % (Context.event)
+            Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
+            return 200, 'ignore %s event because local repository directory can not be created' % (Context.event)
+    try:
+        Message += 'mount local repository %s\n' % (RepositoryPath)
+        StartTime = datetime.now()
+        GitRepo = git.Repo(RepositoryPath)
+        Message += '  SUCCESS:' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
+    except:
+        Message += '  FAIL   :' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
+        try:
+            Message += 'init local repository %s\n' % (RepositoryPath)
+            StartTime = datetime.now()
+            GitRepo = git.Repo.init (RepositoryPath, bare=True)
+            Message += '  SUCCESS:' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
+        except:
+            Message += '  FAIL   :' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
+            Context.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (Context.HubPullRequest.number), Message)
+            Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
+            return 200, 'ignore %s event because local repository can not be mounted or initialized' % (Context.event)
+    try:
+        Message += 'add origin remote local repository %s\n' % (RepositoryPath)
+        StartTime = datetime.now()
+        Origin = GitRepo.remotes['origin']
+        Message += '  SUCCESS:' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
+    except:
+        try:
+            Message += 'create remote origin local repository %s\n' % (RepositoryPath)
+            StartTime = datetime.now()
+            Origin = GitRepo.create_remote ('origin', Context.HubPullRequest.base.repo.html_url)
+            Message += '  SUCCESS:' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
+        except:
+            Message += '  FAIL   :' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
+            Context.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (Context.HubPullRequest.number), Message)
+            Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
+            return 200, 'ignore %s event because local repository can not add add or create remote origin' % (Context.event)
 
     #
     # Fetch the current pull request branch from origin
     #
     Message += 'Check commits\n'
-    StartTime = datetime.datetime.now()
+    StartTime = datetime.now()
     # Get list of commits from the pull request
     CommitList = [Commit for Commit in Context.HubPullRequest.get_commits()]
     FetchRequired = False
@@ -86,20 +96,22 @@ def FetchPullRequest(Context):
             GitRepo.commit(Commit.sha)
         except:
             FetchRequired = True
-    Message += '  SUCCESS:' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
+#    print (GitRepo.log(CommitList[0].sha, '--oneline'))
+
+    Message += '  SUCCESS:' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
     if FetchRequired:
         P = Progress()
         try:
             Message += 'git fetch origin +refs/pull/%d/*:refs/remotes/origin/pr/%d/*\n' % (Context.HubPullRequest.number, Context.HubPullRequest.number)
-            StartTime = datetime.datetime.now()
+            StartTime = datetime.now()
             Origin.fetch('+refs/pull/%d/*:refs/remotes/origin/pr/%d/*' % (Context.HubPullRequest.number, Context.HubPullRequest.number), progress=P, depth = len(CommitList) + 1)
             Message = Message + P.Log
-            Message += '  SUCCESS:' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
+            Message += '  SUCCESS:' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
         except:
             Message = Message + P.Log
-            Message += '  FAIL   :' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
+            Message += '  FAIL   :' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
             Context.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (Context.HubPullRequest.number), Message)
-            GitRepositoryLock.release()
+            Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
             return 200, 'ignore %s event because PR %d commits can not be fetched' % (Context.event, Context.HubPullRequest.number)
 
     #
@@ -112,27 +124,23 @@ def FetchPullRequest(Context):
             Context.webhookconfiguration.MaintainersTxtPath
             )
         Message += 'Read file ' + url + '\n'
-        StartTime = datetime.datetime.now()
+        StartTime = datetime.now()
         Response=requests.get(url)
         Response.raise_for_status()
         Maintainers = Response.content.decode('utf-8')
-        Message += '  SUCCESS:' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
+        Message += '  SUCCESS:' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
     except:
         # If Maintainers.txt is not available, then return an error
-        Message += '  FAIL   :' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
+        Message += '  FAIL   :' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
         Context.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (Context.HubPullRequest.number), Message)
-        GitRepositoryLock.release()
+        Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
         return 200, 'ignore %s event because Maintainers.txt cannot be read from GitHub' % (Context.event)
 
     # Build list of commit SHA values and list of all maintainers/reviewers
-    #
-    # NOTE: If scope required is entire PR, then git diff on commit range
-    # may be faster way to get list of files modified across an entire PR
-    #
     Message += 'Build list of addresses from Maintainers.txt for each commit\n'
-    StartTime = datetime.datetime.now()
-    CommitAddressDict       = OrderedDict()
-    CommitGitHubIdDict      = OrderedDict()
+    StartTime = datetime.now()
+    CommitAddressDict       = {}
+    CommitGitHubIdDict      = {}
     PullRequestAddressList  = []
     PullRequestGitHubIdList = []
     for Commit in CommitList:
@@ -143,9 +151,9 @@ def FetchPullRequest(Context):
         CommitGitHubIdDict[Commit.sha] = GitHubIdList
         PullRequestAddressList  = list(set(PullRequestAddressList + AddressList))
         PullRequestGitHubIdList = list(set(PullRequestGitHubIdList + GitHubIdList))
-    Message += '  SUCCESS:' + str((datetime.datetime.now() - StartTime).total_seconds()) + ' seconds\n'
+    Message += '  SUCCESS:' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
 
-    GitRepositoryLock.release()
+    Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
 
     Context.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (Context.HubPullRequest.number), Message)
 
@@ -161,22 +169,23 @@ def FetchPullRequest(Context):
 def DeleteRepositoryCache (Context):
     RepositoryPath = os.path.normpath (os.path.join ('Repository', Context.webhookconfiguration.GithubRepo))
     if not os.path.exists (RepositoryPath):
-        return True
-    GitRepositoryLock.acquire()
+        return 200, 'Delete Repo PASS'
+    Globals.AcquireRepositoryLock(Context.webhookconfiguration.GithubRepo)
     try:
         # Make sure all dir and files are writable
         for root, dirs, files in os.walk(RepositoryPath):
             for dir in dirs:
-                os.chmod(os.path.join(root, dir), stat.S_IWRITE)
+                os.chmod(os.path.join(root, dir), stat.S_IRWXU| stat.S_IRWXG| stat.S_IRWXO)
             for file in files:
-                os.chmod(os.path.join(root, file), stat.S_IWRITE)
+                os.chmod(os.path.join(root, file), stat.S_IRWXU| stat.S_IRWXG| stat.S_IRWXO)
         # Remove the entire tree
         shutil.rmtree(RepositoryPath)
-        Status = True
+        Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
+        return 200, 'Delete Repo PASS'
     except:
-        Status = False
-    GitRepositoryLock.release()
-    return Status
+        raise
+        Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
+        return 200, 'Delete Repo FAIL'
 
 def ParseCcLines(Body):
     AddressList = []
@@ -373,7 +382,7 @@ def FormatPatch (
         FromAddress = '%s via TianoCore Webhook <webhook@tianocore.org>' % (HubPullRequest.user.login)
         HeaderInReplyToId = 'In-Reply-To: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0)
         HeaderMessageId   = 'Message-ID: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, PatchNumber)
-    GitRepositoryLock.acquire()
+    Globals.AcquireRepositoryLock(Context.webhookconfiguration.GithubRepo)
     Email = GitRepo.git.format_patch (
               '--stdout',
               '--no-numbered',
@@ -384,7 +393,7 @@ def FormatPatch (
               '--subject-prefix=%s][PATCH v%d %0*d/%d' % (HubRepo.name, PatchSeriesVersion, len(str(HubPullRequest.commits)), PatchNumber, HubPullRequest.commits),
               CommitRange
               )
-    GitRepositoryLock.release()
+    Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
 
     #
     # Remove first line from format-patch that is not part of email and parse
@@ -575,7 +584,7 @@ def FormatPatchSummary (
             HeaderInReplyToId = None
             HeaderMessageId   = 'Message-ID: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0)
     if HeaderInReplyToId:
-        GitRepositoryLock.acquire()
+        Globals.AcquireRepositoryLock(Context.webhookconfiguration.GithubRepo)
         Email = GitRepo.git.format_patch (
                   '--stdout',
                   '--cover-letter',
@@ -586,9 +595,9 @@ def FormatPatchSummary (
                   '--subject-prefix=%s][PATCH v%d' % (HubRepo.name, PatchSeriesVersion),
                   CommitRange
                   )
-        GitRepositoryLock.release()
+        Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
     else:
-        GitRepositoryLock.acquire()
+        Globals.AcquireRepositoryLock(Context.webhookconfiguration.GithubRepo)
         Email = GitRepo.git.format_patch (
                   '--stdout',
                   '--cover-letter',
@@ -598,7 +607,7 @@ def FormatPatchSummary (
                   '--subject-prefix=%s][PATCH v%d' % (HubRepo.name, PatchSeriesVersion),
                   CommitRange
                   )
-        GitRepositoryLock.release()
+        Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
 
     #
     # Remove first line from format-patch that is not part of email and parse
@@ -704,9 +713,9 @@ def FormatPatchSummary (
             #
             # Generate a quoted file diff for the commit range
             #
-            GitRepositoryLock.acquire()
+            Globals.AcquireRepositoryLock(Context.webhookconfiguration.GithubRepo)
             Diff = '\n-- \n' + GitRepo.git.diff (CommitRange)
-            GitRepositoryLock.release()
+            Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
             Diff = QuoteText (''.join(Diff), '> ', 1)
             Diff = Diff.splitlines(keepends=True)
 
