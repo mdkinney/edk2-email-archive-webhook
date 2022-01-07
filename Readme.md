@@ -72,9 +72,6 @@ and code review activities.
   + https://blog.miguelgrinberg.com/post/flask-mega-tutorial-update-flask-2-0-and-more
   + https://blog.miguelgrinberg.com/post/the-flask-mega-tutorial-part-xvii-deployment-on-linux
 
-* Change WebhookContext to a class with methods to remove passing Context
-  parameter.
-
 * Logs - Show list of events. Hyperlink to list of logs for that event
   Event should provide date/time/event/action.
   + When in event view, show state of each event as a dynamic field.
@@ -84,7 +81,18 @@ and code review activities.
 
 * Make time period that logs are cleared configurable per repository
 
+* Auto clear log entries older than configured time period.
+
 * Update database to auto update if fields or models are added/removed/renamed.
+
+* When adding a new repo or updating an existing repo, generate ping event to
+  validate WebhookSecret value is correct.
+
+            # Generate a ping from GitHub to the webhook listener
+            Hub = Github (self.GithubToken.data)
+            HubRepo = Hub.get_repo(self.GithubRepo.data)
+            for hook in HubRepo.get_hooks():
+                hook.ping()
 
 * See if order of operations can be changed to collect all information required
   to perform all local git operations at same time making lock on repo directory
@@ -112,7 +120,7 @@ and code review activities.
 * Add features to clean up queues to reduce disk space.
   + On demand clean up by admin?
   + Based on age of acked items?
-  + May take a long time to rebuild database.  If timed, do on weekend.
+  + May take a long time to rebuild database. If timed, do on weekend.
 
 * Consider using queues for log information instead of SQLAlchemy to better
   support cleaning up database and reduce disk usage when logs older than
@@ -121,7 +129,7 @@ and code review activities.
 * Clean up SQLAlchemy database so deleted logs reduce database file size.
 
 * Add test case with the same commits in more than one open PR. Commit_comments
-  should generate emails against all PRs with that same commit.  Also include
+  should generate emails against all PRs with that same commit. Also include
   same commit SHA in other repos and make sure those other repos are ignored.
 
 * Review what happens when the PR is an update to Maintainers.txt. Need old
@@ -130,8 +138,6 @@ and code review activities.
 
 * If Maintainers.txt is updated to add/remove maintainers/reviewers, then the
   GitHub repository maintainers/reviewers also needs to be updated.
-
-* Auto clear log entries older than 30 days.
 
 * Git patches with Unicode or invalid UTF8 characters have to be stripped to
   process through python email module.  Example workaround:
@@ -149,6 +155,9 @@ and code review activities.
   simplify the configuration of each repo using GitHub App auth features.
 
 ## Completed Tasks
+
+* DONE 1-6-2021 - Change WebhookContext to a class with methods to remove
+  passing Context parameter. Change name to GithubRequest
 
 * DONE 1-6-2021 - Use persist-queue to queue requests for each repo and to queue
   emails for sending.

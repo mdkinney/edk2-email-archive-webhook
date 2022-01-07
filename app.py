@@ -18,10 +18,9 @@ from json import dumps
 from flask_bootstrap import Bootstrap
 from flask import Flask, render_template, request, redirect, abort, send_from_directory, make_response
 from flask_user import login_required, current_user
-from FetchPullRequest import DeleteRepositoryCache
 from Models import db, User, UserInvitation, CustomUserManager, LogTypeEnum, WebhookEventLog, WebhookLog, WebhookConfiguration, WebhookStatistics
 from Forms import WebhookConfigurationForm
-from Server import ProcessGithubRequest, DispatchGithubRequest, QueueGithubRequest
+from Server import GuthubRequest
 from threading import Thread, Timer
 import Globals
 from SendEmails import SendEmails
@@ -34,25 +33,6 @@ USER_APP_NAME         = 'TianoCore Code Review Archive Service'
 USER_APP_VERSION      = '0.1'
 USER_COPYRIGHT_YEAR   = '2021'
 USER_CORPORATION_NAME = 'TianoCore'
-class WebhookContext(object):
-    def __init__(self, app, webhookconfiguration, eventlog):
-        self.app                     = app
-        self.webhookconfiguration    = webhookconfiguration
-        self.eventlog                = eventlog
-        self.event                   = ''
-        self.action                  = ''
-        self.payload                 = None
-        self.Hub                     = None
-        self.GitRepo                 = None
-        self.HubRepo                 = None
-        self.HubPullRequest          = None
-        self.CommitList              = []
-        self.CommitAddressDict       = {}
-        self.CommitGitHubIdDict      = {}
-        self.PullRequestAddressList  = []
-        self.PullRequestGitHubIdList = []
-        self.NewPatchSeries          = False
-        self.PatchSeriesVersion      = 0
 
 def create_app():
     # Initialize Flask Application
@@ -220,15 +200,15 @@ def create_app():
     def webhook_clearlogrepo(repoid):
         if request.method == 'POST':
             webhookconfiguration = WebhookConfiguration.query.get_or_404(repoid)
-            eventlog = webhookconfiguration.AddEventEntry ()
-            Context = WebhookContext (app, webhookconfiguration, eventlog)
+            eventlog = webhookconfiguration.AddEventEntry()
+            Context = GuthubRequest(app, webhookconfiguration, eventlog)
             Context.event   = 'CUSTOM'
             Context.action  = 'ClearLogs'
             Context.payload = ''
-            eventlog.AddLogEntry (LogTypeEnum.Request, Context.event, Context.action)
+            eventlog.AddLogEntry(LogTypeEnum.Request, Context.event, Context.action)
             WebhookStatistics.query.all()[0].RequestReceived()
-            Status, Message = QueueGithubRequest (Context)
-            eventlog.AddLogEntry (LogTypeEnum.Response, str(Status), Message)
+            Status, Message = Context.QueueGithubRequest()
+            eventlog.AddLogEntry(LogTypeEnum.Response, str(Status), Message)
         return redirect('/config/logsrepo/'+str(repoid))
 
     @app.route('/config/deletegitrepocache/<repoid>', methods=['POST'])
@@ -236,15 +216,15 @@ def create_app():
     def webhook_deletegitrepocache(repoid):
         if request.method == 'POST':
             webhookconfiguration = WebhookConfiguration.query.get_or_404(repoid)
-            eventlog = webhookconfiguration.AddEventEntry ()
-            Context = WebhookContext (app, webhookconfiguration, eventlog)
+            eventlog = webhookconfiguration.AddEventEntry()
+            Context = GuthubRequest(app, webhookconfiguration, eventlog)
             Context.event   = 'CUSTOM'
             Context.action  = 'DeleteRepositoryCache'
             Context.payload = ''
-            eventlog.AddLogEntry (LogTypeEnum.Request, Context.event, Context.action)
+            eventlog.AddLogEntry(LogTypeEnum.Request, Context.event, Context.action)
             WebhookStatistics.query.all()[0].RequestReceived()
-            Status, Message = QueueGithubRequest (Context)
-            eventlog.AddLogEntry (LogTypeEnum.Response, str(Status), Message)
+            Status, Message = Context.QueueGithubRequest()
+            eventlog.AddLogEntry(LogTypeEnum.Response, str(Status), Message)
         return redirect('/config/logsrepo/'+str(repoid))
 
     @app.route('/webhook/<OrgName>/<RepoName>', methods=['POST'])
@@ -256,12 +236,12 @@ def create_app():
             abort(400, 'Unsupported repo')
         if not webhookconfiguration:
             abort(400, 'Unsupported repo')
-        eventlog = webhookconfiguration.AddEventEntry ()
-        Context = WebhookContext (app, webhookconfiguration, eventlog)
-        Status, Message = ProcessGithubRequest (Context)
+        eventlog = webhookconfiguration.AddEventEntry()
+        Context = GuthubRequest(app, webhookconfiguration, eventlog)
+        Status, Message = Context.ProcessGithubRequest()
         Response = make_response({'message': Message}, Status)
         # Add response header and json payload to the log
-        eventlog.AddLogEntry (LogTypeEnum.Response, str(Status), str(Response.headers) + dumps(Response.get_json(), indent=2))
+        eventlog.AddLogEntry(LogTypeEnum.Response, str(Status), str(Response.headers) + dumps(Response.get_json(), indent=2))
         return Response
 
     return app
@@ -278,13 +258,13 @@ def WaitForGitHubRequest():
                 item = queue.get()
                 eventlog = WebhookEventLog.query.get(item[0])
                 if not eventlog:
-                    eventlog = webhookconfiguration.AddEventEntry ()
-                Context = WebhookContext (app, webhookconfiguration, eventlog)
+                    eventlog = webhookconfiguration.AddEventEntry()
+                Context = GuthubRequest(app, webhookconfiguration, eventlog)
                 Context.event   = item[1]
                 Context.action  = item[2]
                 Context.payload = item[3]
-                Status, Message = DispatchGithubRequest (Context)
-                eventlog.AddLogEntry (LogTypeEnum.Finished, str(Status), Message)
+                Status, Message = Context.DispatchGithubRequest()
+                eventlog.AddLogEntry(LogTypeEnum.Finished, str(Status), Message)
                 queue.ack(item)
                 WebhookStatistics.query.all()[0].RequestProcessed()
 
@@ -303,13 +283,13 @@ def WaitForSendEmailsRequest():
             eventlog = WebhookEventLog.query.get(item[0])
             if not eventlog:
                 eventlog = webhookconfiguration.AddEventEntry()
-            Context = WebhookContext (app, webhookconfiguration, eventlog)
+            Context = GuthubRequest(app, webhookconfiguration, eventlog)
             SendEmails(Context, item[4], item[2], item[3])
             eventlog.AddLogEntry(LogTypeEnum.Finished, 200, 'Emails sent')
             queue.ack(item)
 
 def StartQueueListeners():
-    print ('Start Queue Listeners')
+    print('Start Queue Listeners')
     Thread(target=WaitForGitHubRequest, daemon=True).start()
     Thread(target=WaitForSendEmailsRequest, daemon=True).start()
 
@@ -318,7 +298,7 @@ if __name__ == '__main__':
     app = create_app()
     with app.app_context():
         if User.query.all() == []:
-            print ('ERROR: No users in database.')
+            print('ERROR: No users in database.')
             sys.exit(1)
         # Retrieve existing statistics records
         StatisticList = WebhookStatistics.query.all()
