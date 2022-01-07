@@ -18,13 +18,13 @@ TianoCore Code Review Archive Service Configuration Settings
 SECRET_KEY = ''
 
 #
-# Flask UserManager Settings - Configurable
+# Flask UserManager Settings
 #
 USER_EMAIL_SENDER_EMAIL              = 'noreply@noreply.org'
 USER_INVITE_EXPIRATION               = 2*24*60*60  # 2 days in seconds
 
 #
-# Flask Mail Settings used to send emails through SMTP mail server - Configurable
+# Flask Mail Settings used to send emails through SMTP mail server
 #
 MAIL_SERVER         = ''
 MAIL_PORT           = 587
