@@ -8,20 +8,19 @@
 '''
 FetchPullRequest
 '''
-from __future__ import print_function
-
 import os
 import git
 import email
 import textwrap
-import threading
 import shutil
 import stat
 import requests
-from datetime import datetime
-from Models import LogTypeEnum
-from GetMaintainers import GetMaintainers, ParseMaintainerAddresses
-import Globals
+from datetime       import datetime
+from Models         import LogTypeEnum
+from .GetMaintainers import GetMaintainers
+from .GetMaintainers import ParseMaintainerAddresses
+from Globals        import AcquireRepositoryLock
+from Globals        import ReleaseRepositoryLock
 
 class Progress(git.remote.RemoteProgress):
     def __init__(self):
@@ -30,14 +29,14 @@ class Progress(git.remote.RemoteProgress):
     def update(self, op_code, cur_count, max_count=None, message=''):
         self.Log += '    ' + self._cur_line + '\n'
 
-def FetchPullRequest(Context):
+def FetchPullRequest(self):
     #
     # Fetch the base.ref branch and current PR branch from the base repository
     # of the pull request
     #
-    Globals.AcquireRepositoryLock(Context.webhookconfiguration.GithubRepo)
+    AcquireRepositoryLock(self.webhookconfiguration.GithubRepo)
     Message = ''
-    RepositoryPath = os.path.normpath (os.path.join ('Repository', Context.HubPullRequest.base.repo.full_name))
+    RepositoryPath = os.path.normpath (os.path.join ('Repository', self.HubPullRequest.base.repo.full_name))
     if not os.path.exists (RepositoryPath):
         try:
             Message += 'create directory local repository %s\n' % (RepositoryPath)
@@ -46,9 +45,9 @@ def FetchPullRequest(Context):
             Message += '  SUCCESS:' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
         except:
             Message += '  FAIL   :' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
-            Context.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (Context.HubPullRequest.number), Message)
-            Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
-            return 200, 'ignore %s event because local repository directory can not be created' % (Context.event)
+            self.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (self.HubPullRequest.number), Message)
+            ReleaseRepositoryLock(self.webhookconfiguration.GithubRepo)
+            return 200, 'ignore %s event because local repository directory can not be created' % (self.event)
     try:
         Message += 'mount local repository %s\n' % (RepositoryPath)
         StartTime = datetime.now()
@@ -63,9 +62,9 @@ def FetchPullRequest(Context):
             Message += '  SUCCESS:' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
         except:
             Message += '  FAIL   :' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
-            Context.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (Context.HubPullRequest.number), Message)
-            Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
-            return 200, 'ignore %s event because local repository can not be mounted or initialized' % (Context.event)
+            self.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (self.HubPullRequest.number), Message)
+            ReleaseRepositoryLock(self.webhookconfiguration.GithubRepo)
+            return 200, 'ignore %s event because local repository can not be mounted or initialized' % (self.event)
     try:
         Message += 'add origin remote local repository %s\n' % (RepositoryPath)
         StartTime = datetime.now()
@@ -75,13 +74,13 @@ def FetchPullRequest(Context):
         try:
             Message += 'create remote origin local repository %s\n' % (RepositoryPath)
             StartTime = datetime.now()
-            Origin = GitRepo.create_remote ('origin', Context.HubPullRequest.base.repo.html_url)
+            Origin = GitRepo.create_remote ('origin', self.HubPullRequest.base.repo.html_url)
             Message += '  SUCCESS:' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
         except:
             Message += '  FAIL   :' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
-            Context.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (Context.HubPullRequest.number), Message)
-            Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
-            return 200, 'ignore %s event because local repository can not add add or create remote origin' % (Context.event)
+            self.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (self.HubPullRequest.number), Message)
+            ReleaseRepositoryLock(self.webhookconfiguration.GithubRepo)
+            return 200, 'ignore %s event because local repository can not add add or create remote origin' % (self.event)
 
     #
     # Fetch the current pull request branch from origin
@@ -89,39 +88,38 @@ def FetchPullRequest(Context):
     Message += 'Check commits\n'
     StartTime = datetime.now()
     # Get list of commits from the pull request
-    CommitList = [Commit for Commit in Context.HubPullRequest.get_commits()]
+    CommitList = [Commit for Commit in self.HubPullRequest.get_commits()]
     FetchRequired = False
     for Commit in CommitList:
         try:
             GitRepo.commit(Commit.sha)
         except:
             FetchRequired = True
-#    print (GitRepo.log(CommitList[0].sha, '--oneline'))
 
     Message += '  SUCCESS:' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
     if FetchRequired:
         P = Progress()
         try:
-            Message += 'git fetch origin +refs/pull/%d/*:refs/remotes/origin/pr/%d/*\n' % (Context.HubPullRequest.number, Context.HubPullRequest.number)
+            Message += 'git fetch origin +refs/pull/%d/*:refs/remotes/origin/pr/%d/*\n' % (self.HubPullRequest.number, self.HubPullRequest.number)
             StartTime = datetime.now()
-            Origin.fetch('+refs/pull/%d/*:refs/remotes/origin/pr/%d/*' % (Context.HubPullRequest.number, Context.HubPullRequest.number), progress=P, depth = len(CommitList) + 1)
+            Origin.fetch('+refs/pull/%d/*:refs/remotes/origin/pr/%d/*' % (self.HubPullRequest.number, self.HubPullRequest.number), progress=P, depth = len(CommitList) + 1)
             Message = Message + P.Log
             Message += '  SUCCESS:' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
         except:
             Message = Message + P.Log
             Message += '  FAIL   :' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
-            Context.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (Context.HubPullRequest.number), Message)
-            Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
-            return 200, 'ignore %s event because PR %d commits can not be fetched' % (Context.event, Context.HubPullRequest.number)
+            self.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (self.HubPullRequest.number), Message)
+            ReleaseRepositoryLock(self.webhookconfiguration.GithubRepo)
+            return 200, 'ignore %s event because PR %d commits can not be fetched' % (self.event, self.HubPullRequest.number)
 
     #
     # Read Maintainers.txt from GitHub as a raw file in base branch of the pull request
     #
     try:
         url = 'https://raw.githubusercontent.com/%s/%s/%s' % (
-            Context.HubPullRequest.base.repo.full_name,
-            Context.HubPullRequest.base.ref,
-            Context.webhookconfiguration.MaintainersTxtPath
+            self.HubPullRequest.base.repo.full_name,
+            self.HubPullRequest.base.ref,
+            self.webhookconfiguration.MaintainersTxtPath
             )
         Message += 'Read file ' + url + '\n'
         StartTime = datetime.now()
@@ -132,9 +130,9 @@ def FetchPullRequest(Context):
     except:
         # If Maintainers.txt is not available, then return an error
         Message += '  FAIL   :' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
-        Context.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (Context.HubPullRequest.number), Message)
-        Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
-        return 200, 'ignore %s event because Maintainers.txt cannot be read from GitHub' % (Context.event)
+        self.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (self.HubPullRequest.number), Message)
+        ReleaseRepositoryLock(self.webhookconfiguration.GithubRepo)
+        return 200, 'ignore %s event because Maintainers.txt cannot be read from GitHub' % (self.event)
 
     # Build list of commit SHA values and list of all maintainers/reviewers
     Message += 'Build list of addresses from Maintainers.txt for each commit\n'
@@ -153,24 +151,24 @@ def FetchPullRequest(Context):
         PullRequestGitHubIdList = list(set(PullRequestGitHubIdList + GitHubIdList))
     Message += '  SUCCESS:' + str((datetime.now() - StartTime).total_seconds()) + ' seconds\n'
 
-    Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
+    ReleaseRepositoryLock(self.webhookconfiguration.GithubRepo)
 
-    Context.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (Context.HubPullRequest.number), Message)
+    self.eventlog.AddLogEntry (LogTypeEnum.Message, 'Git fetch PR[%d]' % (self.HubPullRequest.number), Message)
 
     # Update context structure
-    Context.GitRepo                 = GitRepo
-    Context.CommitList              = CommitList
-    Context.CommitAddressDict       = CommitAddressDict
-    Context.CommitGitHubIdDict      = CommitGitHubIdDict
-    Context.PullRequestAddressList  = PullRequestAddressList
-    Context.PullRequestGitHubIdList = PullRequestGitHubIdList
+    self.GitRepo                 = GitRepo
+    self.CommitList              = CommitList
+    self.CommitAddressDict       = CommitAddressDict
+    self.CommitGitHubIdDict      = CommitGitHubIdDict
+    self.PullRequestAddressList  = PullRequestAddressList
+    self.PullRequestGitHubIdList = PullRequestGitHubIdList
     return 0, ''
 
-def DeleteRepositoryCache (Context):
-    RepositoryPath = os.path.normpath (os.path.join ('Repository', Context.webhookconfiguration.GithubRepo))
+def DeleteRepositoryCache (self):
+    RepositoryPath = os.path.normpath (os.path.join ('Repository', self.webhookconfiguration.GithubRepo))
     if not os.path.exists (RepositoryPath):
         return 200, 'Delete Repo PASS'
-    Globals.AcquireRepositoryLock(Context.webhookconfiguration.GithubRepo)
+    AcquireRepositoryLock(self.webhookconfiguration.GithubRepo)
     try:
         # Make sure all dir and files are writable
         for root, dirs, files in os.walk(RepositoryPath):
@@ -180,11 +178,11 @@ def DeleteRepositoryCache (Context):
                 os.chmod(os.path.join(root, file), stat.S_IRWXU| stat.S_IRWXG| stat.S_IRWXO)
         # Remove the entire tree
         shutil.rmtree(RepositoryPath)
-        Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
+        ReleaseRepositoryLock(self.webhookconfiguration.GithubRepo)
         return 200, 'Delete Repo PASS'
     except:
         raise
-        Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
+        ReleaseRepositoryLock(self.webhookconfiguration.GithubRepo)
         return 200, 'Delete Repo FAIL'
 
 def ParseCcLines(Body):
@@ -251,12 +249,12 @@ def QuoteText (Text, Prefix, Depth):
 
 def WrapParagraph (Paragraph, LineEnding):
     WrappedParagraph = textwrap.wrap(
-                           Paragraph,
-                           replace_whitespace=False,
-                           drop_whitespace=False,
-                           break_long_words=False,
-                           break_on_hyphens=False
-                           )
+                        Paragraph,
+                        replace_whitespace=False,
+                        drop_whitespace=False,
+                        break_long_words=False,
+                        break_on_hyphens=False
+                        )
     Length = len(WrappedParagraph[0]) - len(WrappedParagraph[0].lstrip(' '))
     WrappedParagraph = [X.lstrip(' ') for X in WrappedParagraph]
     if len(WrappedParagraph) > 1 and WrappedParagraph[-1].rstrip() == '':
@@ -284,27 +282,27 @@ def CommentAsEmailText(Comment, LineEnding, Prefix, Depth):
                     Paragraph = Paragraph[len(Prefix):]
                     PrefixDepth = PrefixDepth + 1
             WrappedParagraph = QuoteText (
-                                   WrapParagraph(Paragraph, LineEnding),
-                                   Prefix,
-                                   PrefixDepth
-                                   )
+                                    WrapParagraph(Paragraph, LineEnding),
+                                    Prefix,
+                                    PrefixDepth
+                                    )
             WrappedBody.append (WrappedParagraph)
 
     if hasattr(Comment, 'state'):
         String = 'On %s @%s started a review with state %s:%s%s' % (
-                     str(Comment.submitted_at),
-                     Comment.user.login,
-                     Comment.state,
-                     LineEnding,
-                     ''.join(WrappedBody)
-                     )
+                    str(Comment.submitted_at),
+                    Comment.user.login,
+                    Comment.state,
+                    LineEnding,
+                    ''.join(WrappedBody)
+                    )
     else:
         String = 'On %s @%s wrote:%s%s' % (
-                     str(Comment.created_at),
-                     Comment.user.login,
-                     LineEnding,
-                     ''.join(WrappedBody)
-                     )
+                    str(Comment.created_at),
+                    Comment.user.login,
+                    LineEnding,
+                    ''.join(WrappedBody)
+                    )
     if String[-1] not in ['\n','\r']:
         String = String + LineEnding
     try:
@@ -342,7 +340,7 @@ def QuoteCommentList (Comments, Before = '', After = '', LineEnding = '\n', Pref
     return Body
 
 def FormatPatch (
-        Context,
+        self,
         Commit,
         PatchNumber,
         CommentUser        = None,
@@ -353,11 +351,11 @@ def FormatPatch (
         CommentInReplyToId = None
         ):
 
-    HubRepo            = Context.HubRepo
-    HubPullRequest     = Context.HubPullRequest
-    GitRepo            = Context.GitRepo
-    PatchSeriesVersion = Context.PatchSeriesVersion
-    AddressList        = Context.CommitAddressDict[Commit.sha]
+    HubRepo            = self.HubRepo
+    HubPullRequest     = self.HubPullRequest
+    GitRepo            = self.GitRepo
+    PatchSeriesVersion = self.PatchSeriesVersion
+    AddressList        = self.CommitAddressDict[Commit.sha]
 
     #
     # Default range is a single commit
@@ -370,7 +368,7 @@ def FormatPatch (
     # Format the Messsage-ID:
     #   <webhook-<repo name>-pr<pull>-v<patch series version>-p<patch number>@tianocore.org>
     #
-    ToAddress = '<%s>' % (Context.webhookconfiguration.EmailArchiveAddress)
+    ToAddress = '<%s>' % (self.webhookconfiguration.EmailArchiveAddress)
     if CommentId:
         FromAddress = '%s via TianoCore Webhook <webhook@tianocore.org>' % (CommentUser)
         HeaderMessageId   = 'Message-ID: <webhook-%s-pull%d-v%d-p%d-c%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, PatchNumber, CommentId)
@@ -382,18 +380,18 @@ def FormatPatch (
         FromAddress = '%s via TianoCore Webhook <webhook@tianocore.org>' % (HubPullRequest.user.login)
         HeaderInReplyToId = 'In-Reply-To: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0)
         HeaderMessageId   = 'Message-ID: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, PatchNumber)
-    Globals.AcquireRepositoryLock(Context.webhookconfiguration.GithubRepo)
+    AcquireRepositoryLock(self.webhookconfiguration.GithubRepo)
     Email = GitRepo.git.format_patch (
-              '--stdout',
-              '--no-numbered',
-              '--to=' + ToAddress,
-              '--from=' + FromAddress,
-              '--add-header=' + HeaderInReplyToId,
-              '--add-header=' + HeaderMessageId,
-              '--subject-prefix=%s][PATCH v%d %0*d/%d' % (HubRepo.name, PatchSeriesVersion, len(str(HubPullRequest.commits)), PatchNumber, HubPullRequest.commits),
-              CommitRange
-              )
-    Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
+            '--stdout',
+            '--no-numbered',
+            '--to=' + ToAddress,
+            '--from=' + FromAddress,
+            '--add-header=' + HeaderInReplyToId,
+            '--add-header=' + HeaderMessageId,
+            '--subject-prefix=%s][PATCH v%d %0*d/%d' % (HubRepo.name, PatchSeriesVersion, len(str(HubPullRequest.commits)), PatchNumber, HubPullRequest.commits),
+            CommitRange
+            )
+    ReleaseRepositoryLock(self.webhookconfiguration.GithubRepo)
 
     #
     # Remove first line from format-patch that is not part of email and parse
@@ -436,9 +434,9 @@ def FormatPatch (
         # Get the comments that apply based on the event type
         #
         AllComments = []
-        if Context.event == 'commit_comment':
+        if self.event == 'commit_comment':
             AllComments = Commit.get_comments()
-        if Context.event == 'pull_request_review_comment':
+        if self.event == 'pull_request_review_comment':
             AllComments = HubPullRequest.get_review_comments()
         #
         # Only keep the comments that match the CommentPath and CommentPosition
@@ -456,11 +454,11 @@ def FormatPatch (
             # message and all previous comments.
             #
             Body = QuoteCommentList (
-                       Comments,
-                       Before     = Body[0],
-                       LineEnding = LineEnding,
-                       Prefix     = Prefix
-                       )
+                    Comments,
+                    Before     = Body[0],
+                    LineEnding = LineEnding,
+                    Prefix     = Prefix
+                    )
         else:
             #
             # Find the portion of the patch diffs that contain changes to the
@@ -493,22 +491,22 @@ def FormatPatch (
             # Insert comments into patch at CommentPosition + 1 lines after '@@ '
             #
             LineNumber = LineNumber + CommentPosition + 1
-            if PatchLines > Context.webhookconfiguration.LargePatchLines:
+            if PatchLines > self.webhookconfiguration.LargePatchLines:
                 Body = QuoteCommentList (
-                           Comments,
-                           Before     = Body[0] + BeforeBody + ''.join(Body[1][:LineNumber]),
-                           After      = ''.join(Body[1][LineNumber:]) + AfterBody,
-                           LineEnding = LineEnding,
-                           Prefix     = Prefix
-                           )
+                        Comments,
+                        Before     = Body[0] + BeforeBody + ''.join(Body[1][:LineNumber]),
+                        After      = ''.join(Body[1][LineNumber:]) + AfterBody,
+                        LineEnding = LineEnding,
+                        Prefix     = Prefix
+                        )
             else:
                 Body = QuoteCommentList (
-                           Comments,
-                           Before     = Body[0] + ''.join(Body[1][:LineNumber]),
-                           After      = ''.join(Body[1][LineNumber:]),
-                           LineEnding = LineEnding,
-                           Prefix     = Prefix
-                           )
+                        Comments,
+                        Before     = Body[0] + ''.join(Body[1][:LineNumber]),
+                        After      = ''.join(Body[1][LineNumber:]),
+                        LineEnding = LineEnding,
+                        Prefix     = Prefix
+                        )
     else:
         Body = Body[0] + Body[1]
 
@@ -519,7 +517,7 @@ def FormatPatch (
     return Message.as_string()
 
 def FormatPatchSummary (
-        Context,
+        self,
         CommentUser = None,
         CommentId = None,
         CommentPosition = None,
@@ -534,14 +532,14 @@ def FormatPatchSummary (
         ParentReviewId = None
         ):
 
-    HubRepo            = Context.HubRepo
-    HubPullRequest     = Context.HubPullRequest
-    GitRepo            = Context.GitRepo
-    AddressList        = Context.PullRequestAddressList
-    PatchSeriesVersion = Context.PatchSeriesVersion
+    HubRepo            = self.HubRepo
+    HubPullRequest     = self.HubPullRequest
+    GitRepo            = self.GitRepo
+    AddressList        = self.PullRequestAddressList
+    PatchSeriesVersion = self.PatchSeriesVersion
 
     # Default commit range is the entire pull request
-    CommitRange = Context.CommitList[0].sha + '..' + Context.CommitList[-1].sha
+    CommitRange = self.CommitList[0].sha + '..' + self.CommitList[-1].sha
 
     #
     # Format the Subject:
@@ -549,7 +547,7 @@ def FormatPatchSummary (
     # Format the Messsage-ID:
     #   <webhook-<repo name>-pr<pull>-v<patch series version>-p<patch number>@tianocore.org>
     #
-    ToAddress = '<%s>' % (Context.webhookconfiguration.EmailArchiveAddress)
+    ToAddress = '<%s>' % (self.webhookconfiguration.EmailArchiveAddress)
     if ReviewId:
         FromAddress = '%s via TianoCore Webhook <webhook@tianocore.org>' % (CommentUser)
         if DeleteId:
@@ -584,30 +582,30 @@ def FormatPatchSummary (
             HeaderInReplyToId = None
             HeaderMessageId   = 'Message-ID: <webhook-%s-pull%d-v%d-p%d@tianocore.org>' % (HubRepo.name, HubPullRequest.number, PatchSeriesVersion, 0)
     if HeaderInReplyToId:
-        Globals.AcquireRepositoryLock(Context.webhookconfiguration.GithubRepo)
+        AcquireRepositoryLock(self.webhookconfiguration.GithubRepo)
         Email = GitRepo.git.format_patch (
-                  '--stdout',
-                  '--cover-letter',
-                  '--to=' + ToAddress,
-                  '--from=' + FromAddress,
-                  '--add-header=' + HeaderInReplyToId,
-                  '--add-header=' + HeaderMessageId,
-                  '--subject-prefix=%s][PATCH v%d' % (HubRepo.name, PatchSeriesVersion),
-                  CommitRange
-                  )
-        Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
+                '--stdout',
+                '--cover-letter',
+                '--to=' + ToAddress,
+                '--from=' + FromAddress,
+                '--add-header=' + HeaderInReplyToId,
+                '--add-header=' + HeaderMessageId,
+                '--subject-prefix=%s][PATCH v%d' % (HubRepo.name, PatchSeriesVersion),
+                CommitRange
+                )
+        ReleaseRepositoryLock(self.webhookconfiguration.GithubRepo)
     else:
-        Globals.AcquireRepositoryLock(Context.webhookconfiguration.GithubRepo)
+        AcquireRepositoryLock(self.webhookconfiguration.GithubRepo)
         Email = GitRepo.git.format_patch (
-                  '--stdout',
-                  '--cover-letter',
-                  '--to=' + ToAddress,
-                  '--from=' + FromAddress,
-                  '--add-header=' + HeaderMessageId,
-                  '--subject-prefix=%s][PATCH v%d' % (HubRepo.name, PatchSeriesVersion),
-                  CommitRange
-                  )
-        Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
+                '--stdout',
+                '--cover-letter',
+                '--to=' + ToAddress,
+                '--from=' + FromAddress,
+                '--add-header=' + HeaderMessageId,
+                '--subject-prefix=%s][PATCH v%d' % (HubRepo.name, PatchSeriesVersion),
+                CommitRange
+                )
+        ReleaseRepositoryLock(self.webhookconfiguration.GithubRepo)
 
     #
     # Remove first line from format-patch that is not part of email and parse
@@ -655,7 +653,7 @@ def FormatPatchSummary (
     # Otherwise, this is a Patch #0 email that includes the file change summary.
     #
     if CommentId or Review:
-        if Context.event in ['pull_request_review_comment', 'pull_request_review'] and ReviewComments:
+        if self.event in ['pull_request_review_comment', 'pull_request_review'] and ReviewComments:
             if Review:
                 #
                 # Add description of review to email
@@ -664,17 +662,17 @@ def FormatPatchSummary (
                 Body[0] = Body[0] + '-' * 20 + LineEnding
                 if Review.body:
                     String = 'On %s @%s started a review with state %s:' % (
-                                 str(Review.submitted_at),
-                                 Review.user.login,
-                                 Review.state
-                                 )
+                                str(Review.submitted_at),
+                                Review.user.login,
+                                Review.state
+                                )
                     Body[0] = Body[0] + String + LineEnding
                     Body[0] = Body[0] + WrapText (Review.body, LineEnding) + LineEnding
                 else:
                     String = 'On %s @%s added a single review comment:' % (
-                                 str(Review.submitted_at),
-                                 Review.user.login
-                                 )
+                                str(Review.submitted_at),
+                                Review.user.login
+                                )
                     Body[0] = Body[0] + String + LineEnding
                 Body[0] = Body[0] + '-' * 20 + LineEnding
 
@@ -713,9 +711,9 @@ def FormatPatchSummary (
             #
             # Generate a quoted file diff for the commit range
             #
-            Globals.AcquireRepositoryLock(Context.webhookconfiguration.GithubRepo)
+            AcquireRepositoryLock(self.webhookconfiguration.GithubRepo)
             Diff = '\n-- \n' + GitRepo.git.diff (CommitRange)
-            Globals.ReleaseRepositoryLock(Context.webhookconfiguration.GithubRepo)
+            ReleaseRepositoryLock(self.webhookconfiguration.GithubRepo)
             Diff = QuoteText (''.join(Diff), '> ', 1)
             Diff = Diff.splitlines(keepends=True)
 
@@ -723,7 +721,7 @@ def FormatPatchSummary (
             # If diff is > LargePatchLines, then only keep diff lines associated
             # with the files mentioned in the comments
             #
-            if len(Diff) > Context.webhookconfiguration.LargePatchLines:
+            if len(Diff) > self.webhookconfiguration.LargePatchLines:
                 NewDiff = []
                 for CommentPath in CommentDict:
                     Start  = '> diff --git a/' + CommentPath + ' b/' + CommentPath + '\n'
@@ -763,10 +761,10 @@ def FormatPatchSummary (
 
                 for CommentPosition in CommentDict[CommentPath]:
                     CommentBody = QuoteCommentList (
-                                      CommentDict[CommentPath][CommentPosition],
-                                      LineEnding = LineEnding,
-                                      Prefix     = ''
-                                      )
+                                    CommentDict[CommentPath][CommentPosition],
+                                    LineEnding = LineEnding,
+                                    Prefix     = ''
+                                    )
                     Conversations[StartLineNumber + CommentPosition + 1] = CommentBody
 
             #
@@ -809,11 +807,11 @@ def FormatPatchSummary (
                     IssueComments.append(Review)
 
             Body = QuoteCommentList (
-                       IssueComments,
-                       Before     = Body[0],
-                       LineEnding = LineEnding,
-                       Prefix     = Prefix
-                       )
+                    IssueComments,
+                    Before     = Body[0],
+                    LineEnding = LineEnding,
+                    Prefix     = Prefix
+                    )
     else:
         #
         # This is a Patch #0 email that includes the file change summary.

@@ -6,9 +6,8 @@
 #  SPDX-License-Identifier: BSD-2-Clause-Patent
 #
 
-from __future__ import print_function
-from collections import defaultdict
 import re
+from collections import defaultdict
 
 EXPRESSIONS = {
     'exclude':    re.compile(r'^X:\s*(?P<exclude>.*?)\r*$'),

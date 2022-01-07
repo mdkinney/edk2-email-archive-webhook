@@ -8,11 +8,10 @@
 '''
 adduser
 '''
-import sys
 import argparse
 from datetime import datetime
-from app import create_app
-from Models import db, User
+from app      import create_app
+from Models   import db, User
 
 #
 # Globals for help information

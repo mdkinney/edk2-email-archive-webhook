@@ -20,10 +20,9 @@ from flask import Flask, render_template, request, redirect, abort, send_from_di
 from flask_user import login_required, current_user
 from Models import db, User, UserInvitation, CustomUserManager, LogTypeEnum, WebhookEventLog, WebhookLog, WebhookConfiguration, WebhookStatistics
 from Forms import WebhookConfigurationForm
-from Server import GuthubRequest
+from GithubRequest.GithubRequest import GithubRequest
 from threading import Thread, Timer
 import Globals
-from SendEmails import SendEmails
 
 #
 # Flask Application Settings
@@ -128,7 +127,8 @@ def create_app():
     @app.route('/config/resetstatistics', methods=['POST'])
     @login_required
     def webhook_resetstatistics():
-        WebhookStatistics.query.all()[0].ResetStatistics()
+        if request.method == 'POST':
+            WebhookStatistics.query.all()[0].ResetStatistics()
         return redirect('/config/listrepos')
 
     @app.route('/config/addrepo', methods=['GET', 'POST'])
@@ -201,10 +201,7 @@ def create_app():
         if request.method == 'POST':
             webhookconfiguration = WebhookConfiguration.query.get_or_404(repoid)
             eventlog = webhookconfiguration.AddEventEntry()
-            Context = GuthubRequest(app, webhookconfiguration, eventlog)
-            Context.event   = 'CUSTOM'
-            Context.action  = 'ClearLogs'
-            Context.payload = ''
+            Context = GithubRequest(app, webhookconfiguration, eventlog, 'CUSTOM', 'ClearLogs')
             eventlog.AddLogEntry(LogTypeEnum.Request, Context.event, Context.action)
             WebhookStatistics.query.all()[0].RequestReceived()
             Status, Message = Context.QueueGithubRequest()
@@ -217,10 +214,7 @@ def create_app():
         if request.method == 'POST':
             webhookconfiguration = WebhookConfiguration.query.get_or_404(repoid)
             eventlog = webhookconfiguration.AddEventEntry()
-            Context = GuthubRequest(app, webhookconfiguration, eventlog)
-            Context.event   = 'CUSTOM'
-            Context.action  = 'DeleteRepositoryCache'
-            Context.payload = ''
+            Context = GithubRequest(app, webhookconfiguration, eventlog, 'CUSTOM', 'DeleteRepositoryCache')
             eventlog.AddLogEntry(LogTypeEnum.Request, Context.event, Context.action)
             WebhookStatistics.query.all()[0].RequestReceived()
             Status, Message = Context.QueueGithubRequest()
@@ -237,7 +231,7 @@ def create_app():
         if not webhookconfiguration:
             abort(400, 'Unsupported repo')
         eventlog = webhookconfiguration.AddEventEntry()
-        Context = GuthubRequest(app, webhookconfiguration, eventlog)
+        Context = GithubRequest(app, webhookconfiguration, eventlog)
         Status, Message = Context.ProcessGithubRequest()
         Response = make_response({'message': Message}, Status)
         # Add response header and json payload to the log
@@ -259,10 +253,7 @@ def WaitForGitHubRequest():
                 eventlog = WebhookEventLog.query.get(item[0])
                 if not eventlog:
                     eventlog = webhookconfiguration.AddEventEntry()
-                Context = GuthubRequest(app, webhookconfiguration, eventlog)
-                Context.event   = item[1]
-                Context.action  = item[2]
-                Context.payload = item[3]
+                Context = GithubRequest(app, webhookconfiguration, eventlog, item[1], item[2], item[3])
                 Status, Message = Context.DispatchGithubRequest()
                 eventlog.AddLogEntry(LogTypeEnum.Finished, str(Status), Message)
                 queue.ack(item)
@@ -283,8 +274,8 @@ def WaitForSendEmailsRequest():
             eventlog = WebhookEventLog.query.get(item[0])
             if not eventlog:
                 eventlog = webhookconfiguration.AddEventEntry()
-            Context = GuthubRequest(app, webhookconfiguration, eventlog)
-            SendEmails(Context, item[4], item[2], item[3])
+            Context = GithubRequest(app, webhookconfiguration, eventlog)
+            Context.SendEmails(item[4], item[2], item[3])
             eventlog.AddLogEntry(LogTypeEnum.Finished, 200, 'Emails sent')
             queue.ack(item)
 

@@ -11,10 +11,10 @@ TianoCore Code Review Archive Service Flask Models
 
 import re
 import enum
-from datetime import datetime
+from datetime         import datetime
 from flask_sqlalchemy import SQLAlchemy
-from flask_user import UserManager, UserMixin
-from wtforms import ValidationError
+from flask_user       import UserManager, UserMixin
+from wtforms          import ValidationError
 
 db = SQLAlchemy()
 

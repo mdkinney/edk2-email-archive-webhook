@@ -8,14 +8,14 @@
 '''
 TianoCore Code Review Archive Service Flask Forms
 '''
-#from email.policy import default
-from flask_wtf import FlaskForm
-from wtforms import StringField, SelectField, SubmitField, IntegerField
-from wtforms.widgets import PasswordInput
-from wtforms.validators import Email, ValidationError
-from Models import WebhookConfiguration
-from github import Github
+
 import requests
+from flask_wtf          import FlaskForm
+from wtforms            import StringField, SelectField, SubmitField, IntegerField
+from wtforms.widgets    import PasswordInput
+from wtforms.validators import Email, ValidationError
+from Models             import WebhookConfiguration
+from github             import Github
 
 class WebhookConfigurationForm(FlaskForm):
     GithubRepo          = StringField(
