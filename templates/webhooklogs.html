@@ -7,10 +7,10 @@
 <a href={{ url_for('webhook_repos') }}>Repositories</a>
 <td>
   <form method="post" action="/config/clearlogrepo/{{ webhookconfiguration.id }}" onSubmit="return confirm('Are you sure you wish to clear log {{ webhookconfiguration.GithubRepo }}?');">
-    <input type="submit" value="Clear Log" name="clearlog"/>
+    <button>Clear Log</button>
   </form>
   <form method="post" action="/config/deletegitrepocache/{{ webhookconfiguration.id }}" onSubmit="return confirm('Are you sure you wish to delete git repository cache {{ webhookconfiguration.GithubRepo }}?');">
-    <input type="submit" value="Delete Git Repository Cache" name="deletegitrepocache"/>
+    <button>Delete Git Repository Cache</button>
   </form>
 </td>
 <div class="row">

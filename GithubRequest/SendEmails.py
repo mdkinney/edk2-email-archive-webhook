@@ -63,12 +63,12 @@ def SendEmails(self, EmailContents, PrUserLogin = '', PrNumber = 0):
             if self.webhookconfiguration.SendEmail:
                 try:
                     SmtpServer.sendmail(FromAddress, ToList, Email)
-                    WebhookStatistics.query.all()[0].EmailSent()
+                    self.webhookconfiguration.EmailSent()
                 except:
                     self.eventlog.AddLogEntry (LogTypeEnum.Email, 'pr[%d] email[%d]' % (PrNumber, Index), 'SMTP ERROR: Send message failed')
-                    WebhookStatistics.query.all()[0].EmailFailed()
+                    self.webhookconfiguration.EmailFailed()
             else:
-                WebhookStatistics.query.all()[0].EmailSent()
+                self.webhookconfiguration.EmailSent()
             Index = Index + 1
         if self.webhookconfiguration.SendEmail:
             SmtpServer.quit()

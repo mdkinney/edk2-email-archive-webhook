@@ -12,17 +12,13 @@
   <meta http-equiv="refresh" content="5">
 </head>
 <body>
-  <form method="post" action="/config/resetstatistics" onSubmit="return confirm('Are you sure you wish to reset statistics?');">
-    <input type="submit" value="Reset Statistics" name="resetstatistics"/>
-  </form>
-
   <table>
     <caption>Service</caption>
     <tr>
-      <td>Upgrades</td>
-      <td>Last Upgrade</td>
-      <td>Restarts</td>
-      <td>Up Time</td>
+      <th>Upgrades</th>
+      <th>Last Upgrade</th>
+      <th>Restarts</th>
+      <th>Up Time</th>
     </tr>
     <tr>
       <td>{{ NumberOfUpgrades }}</td>
@@ -35,27 +31,21 @@
   <table>
     <caption>Github Requests</caption>
     <tr>
-      <td>Requests</td>
-      <td>Queued</td>
-      <td>Processed</td>
+      <th>GitHub<br />Requests</th>
+      <th>GitHub<br />Queued</th>
+      <th>GitHub<br />Processed</th>
+      <th>GitHub<br />Queue Depth</th>
+      <th>Email<br />Sent</th>
+      <th>Email<br />Failed</th>
+      <th>Email<br />Queue Depth</th>
     </tr>
     <tr>
-      <td>{{ GitHubRequestsReceived }}</td>
-      <td>{{ GitHubRequestsQueued }}</td>
-      <td>{{ GitHubRequestsProcessed }}</td>
-    </tr>
-  </table>
-
-  <table>
-    <caption>Emails</caption>
-    <tr>
-      <td>Sent</td>
-      <td>Failed</td>
-      <td>Queue Depth</td>
-    </tr>
-    <tr>
-      <td>{{ EmailsSent }}</td>
-      <td>{{ EmailsFailed }}</td>
+      <td>{{ AllReceived }}</td>
+      <td>{{ AllQueued }}</td>
+      <td>{{ AllProcessed }}</td>
+      <td>{{ AllQueueDepth }}</td>
+      <td>{{ AllEmailsSent }}</td>
+      <td>{{ AllEmailsFailed }}</td>
       <td>{{ EmailQueueDepth }}</td>
     </tr>
   </table>
@@ -64,9 +54,15 @@
   <caption>Repositories [<a href={{ url_for('webhook_addrepo') }}>Add Repository</a>]</caption>
   <tr>
     <th>Repository</th>
-    <th>Email Archive Address</th>
-    <th>Send Email</th>
-    <th>Queue Depth</th>
+    <th>Email Archive<br />Address</th>
+    <th>Send<br />Email</th>
+    <th>GitHub<br />Requests</th>
+    <th>GitHub<br />Queued</th>
+    <th>GitHub<br />Processed</th>
+    <th>GitHub<br />Queue Depth</th>
+    <th>Emails<br />Sent</th>
+    <th>Emails<br />Failed</th>
+    <th>Action</th>
     <th>Action</th>
     <th>Action</th>
   </tr>
@@ -79,15 +75,25 @@
       </td>
       <td>{{ webhookconfiguration.EmailArchiveAddress }}</td>
       <td>{{ webhookconfiguration.SendEmail }}</td>
+      <td>{{ webhookconfiguration.GitHubRequestsReceived }}</td>
+      <td>{{ webhookconfiguration.GitHubRequestsQueued }}</td>
+      <td>{{ webhookconfiguration.GitHubRequestsProcessed }}</td>
       <td>{{ webhookconfiguration.QueueDepth }}</td>
+      <td>{{ webhookconfiguration.EmailsSent }}</td>
+      <td>{{ webhookconfiguration.EmailsFailed }}</td>
+      <td>
+        <form method="post" action="/config/resetrepo/{{ webhookconfiguration.id }}">
+          <button>Reset<br/>Statistics</button>
+        </form>
+      </td>
       <td>
         <form method="get" action="/config/updaterepo/{{ webhookconfiguration.id }}">
-          <input type="submit" value="Settings" name="settings"/>
+          <button>Settings</button>
         </form>
       </td>
       <td>
         <form method="post" action="/config/deleterepo/{{ webhookconfiguration.id }}" onSubmit="return confirm('Are you sure you wish to delete {{ webhookconfiguration.GithubRepo }}?');">
-          <input type="submit" value="Delete" name="delete"/>
+          <button>Delete</button>
         </form>
       </td>
     </tr>

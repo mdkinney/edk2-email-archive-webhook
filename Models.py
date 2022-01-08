@@ -139,59 +139,25 @@ class WebhookConfiguration(db.Model):
     # Path to Maintainers.txt in the repository.  Default is Maintainters.txt
     # in the root of the repository.
     MaintainersTxtPath  = db.Column(db.String)
-    # The children of this object model are a list of Github POST events
-    children            = db.relationship(lambda: WebhookEventLog)
-
-    def AddEventEntry (self):
-        entry           = WebhookEventLog()
-        entry.TimeStamp = datetime.now()
-        db.session.add(entry)
-        db.session.commit()
-        self.children.append (entry)
-        db.session.commit()
-        return entry
-
-class WebhookStatistics(db.Model):
-    __tablename__           = 'webhook_statistics'
-    id                      = db.Column(db.Integer, primary_key=True)
-    LastUpgradeTimeStamp    = db.Column(db.DateTime())
-    LastRestartTimeStamp    = db.Column(db.DateTime())
+    # Repository scoped statistics
     LastUpdateTimeStamp     = db.Column(db.DateTime())
     LastResetTimeStamp      = db.Column(db.DateTime())
-    LastUpgradeVersion      = db.Column(db.String())
-    NumberOfUpgrades        = db.Column(db.Integer)
-    NumberOfRestarts        = db.Column(db.Integer)
     EmailsSent              = db.Column(db.Integer)
     EmailsFailed            = db.Column(db.Integer)
     GitHubRequestsReceived  = db.Column(db.Integer)
     GitHubRequestsQueued    = db.Column(db.Integer)
     GitHubRequestsProcessed = db.Column(db.Integer)
+    # The children of this object model are a list of Github POST events
+    children            = db.relationship(lambda: WebhookEventLog)
 
     def __init__(self):
-        self.LastUpgradeTimeStamp    = datetime.now()
-        self.LastRestartTimeStamp    = datetime.now()
         self.LastUpdateTimeStamp     = datetime.now()
         self.LastResetTimeStamp      = datetime.now()
-        self.LastUpgradeVersion      = ''
-        self.NumberOfUpgrades        = 0
-        self.NumberOfRestarts        = 0
         self.EmailsSent              = 0
         self.EmailsFailed            = 0
         self.GitHubRequestsReceived  = 0
         self.GitHubRequestsQueued    = 0
         self.GitHubRequestsProcessed = 0
-        db.session.add(self)
-        db.session.commit()
-
-    def RestartService (self, ApplicationNameAndVersion):
-        self.LastRestartTimeStamp    = datetime.now()
-        self.NumberOfRestarts       += 1
-        if self.LastUpgradeVersion != ApplicationNameAndVersion:
-            self.LastUpgradeTimeStamp    = datetime.now()
-            self.LastUpgradeVersion      = ApplicationNameAndVersion
-            self.NumberOfUpgrades       += 1
-            self.NumberOfRestarts        = 0
-        db.session.commit()
 
     def ResetStatistics (self):
         self.LastUpdateTimeStamp     = datetime.now()
@@ -226,4 +192,42 @@ class WebhookStatistics(db.Model):
     def RequestProcessed (self):
         self.LastUpdateTimeStamp      = datetime.now()
         self.GitHubRequestsProcessed += 1
+        db.session.commit()
+
+    def AddEventEntry (self):
+        entry           = WebhookEventLog()
+        entry.TimeStamp = datetime.now()
+        db.session.add(entry)
+        db.session.commit()
+        self.children.append (entry)
+        db.session.commit()
+        return entry
+
+class WebhookStatistics(db.Model):
+    __tablename__           = 'webhook_statistics'
+    id                      = db.Column(db.Integer, primary_key=True)
+    # Service scoped statistics
+    LastUpgradeTimeStamp    = db.Column(db.DateTime())
+    LastUpgradeVersion      = db.Column(db.String())
+    NumberOfUpgrades        = db.Column(db.Integer)
+    LastRestartTimeStamp    = db.Column(db.DateTime())
+    NumberOfRestarts        = db.Column(db.Integer)
+
+    def __init__(self):
+        self.LastUpgradeTimeStamp    = datetime.now()
+        self.LastUpgradeVersion      = ''
+        self.NumberOfUpgrades        = 0
+        self.LastRestartTimeStamp    = datetime.now()
+        self.NumberOfRestarts        = 0
+        db.session.add(self)
+        db.session.commit()
+
+    def RestartService (self, ApplicationNameAndVersion):
+        self.LastRestartTimeStamp  = datetime.now()
+        self.NumberOfRestarts     += 1
+        if self.LastUpgradeVersion != ApplicationNameAndVersion:
+            self.LastUpgradeTimeStamp  = datetime.now()
+            self.LastUpgradeVersion    = ApplicationNameAndVersion
+            self.NumberOfUpgrades     += 1
+            self.NumberOfRestarts      = 0
         db.session.commit()

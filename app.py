@@ -105,30 +105,48 @@ def create_app():
     @login_required
     def webhook_repos():
         webhookconfigurations = WebhookConfiguration.query.all()
+        AllQueueDepth   = 0
+        AllReceived     = 0
+        AllQueued       = 0
+        AllProcessed    = 0
+        AllEmailsSent   = 0
+        AllEmailsFailed = 0
         for webhookconfiguration in webhookconfigurations:
             queue = Globals.GetRepositoryQueue(webhookconfiguration.GithubRepo)
             webhookconfiguration.QueueDepth = queue.active_size()
+            AllQueueDepth   += webhookconfiguration.QueueDepth
+            AllReceived     += webhookconfiguration.GitHubRequestsReceived
+            AllQueued       += webhookconfiguration.GitHubRequestsQueued
+            AllProcessed    += webhookconfiguration.GitHubRequestsProcessed
+            AllEmailsSent   += webhookconfiguration.EmailsSent
+            AllEmailsFailed += webhookconfiguration.EmailsFailed
         Statistics = WebhookStatistics.query.all()[0]
         return render_template(
                    'webhooklistrepos.html',
-                   NumberOfUpgrades        = Statistics.NumberOfUpgrades,
-                   LastUpgradeTime         = Statistics.LastUpgradeTimeStamp,
-                   NumberOfRestarts        = Statistics.NumberOfRestarts,
-                   ServiceUpTime           = datetime.now() - Statistics.LastRestartTimeStamp,
-                   webhookconfigurations   = webhookconfigurations,
-                   EmailQueueDepth         = Globals.GetEmailQueue().active_size(),
-                   EmailsSent              = Statistics.EmailsSent,
-                   EmailsFailed            = Statistics.EmailsFailed,
-                   GitHubRequestsReceived  = Statistics.GitHubRequestsReceived,
-                   GitHubRequestsQueued    = Statistics.GitHubRequestsQueued,
-                   GitHubRequestsProcessed = Statistics.GitHubRequestsProcessed,
+                   NumberOfUpgrades      = Statistics.NumberOfUpgrades,
+                   LastUpgradeTime       = Statistics.LastUpgradeTimeStamp,
+                   NumberOfRestarts      = Statistics.NumberOfRestarts,
+                   ServiceUpTime         = datetime.now() - Statistics.LastRestartTimeStamp,
+                   webhookconfigurations = webhookconfigurations,
+                   EmailQueueDepth       = Globals.GetEmailQueue().active_size(),
+                   AllQueueDepth         = AllQueueDepth,
+                   AllReceived           = AllReceived,
+                   AllQueued             = AllQueued,
+                   AllProcessed          = AllProcessed,
+                   AllEmailsSent         = AllEmailsSent,
+                   AllEmailsFailed       = AllEmailsFailed
                    )
 
-    @app.route('/config/resetstatistics', methods=['POST'])
+    @app.route('/config/resetrepo/<id>', methods=['POST'])
     @login_required
-    def webhook_resetstatistics():
+    def webhook_resetrepo(id):
         if request.method == 'POST':
-            WebhookStatistics.query.all()[0].ResetStatistics()
+            webhookconfiguration = WebhookConfiguration.query.get_or_404(id)
+            eventlog = webhookconfiguration.AddEventEntry()
+            Context = GithubRequest(app, webhookconfiguration, eventlog, 'CUSTOM', 'ResetStatistics')
+            eventlog.AddLogEntry(LogTypeEnum.Request, Context.event, Context.action)
+            Status, Message = Context.QueueGithubRequest()
+            eventlog.AddLogEntry(LogTypeEnum.Response, str(Status), Message)
         return redirect('/config/listrepos')
 
     @app.route('/config/addrepo', methods=['GET', 'POST'])
@@ -203,7 +221,6 @@ def create_app():
             eventlog = webhookconfiguration.AddEventEntry()
             Context = GithubRequest(app, webhookconfiguration, eventlog, 'CUSTOM', 'ClearLogs')
             eventlog.AddLogEntry(LogTypeEnum.Request, Context.event, Context.action)
-            WebhookStatistics.query.all()[0].RequestReceived()
             Status, Message = Context.QueueGithubRequest()
             eventlog.AddLogEntry(LogTypeEnum.Response, str(Status), Message)
         return redirect('/config/logsrepo/'+str(repoid))
@@ -216,20 +233,19 @@ def create_app():
             eventlog = webhookconfiguration.AddEventEntry()
             Context = GithubRequest(app, webhookconfiguration, eventlog, 'CUSTOM', 'DeleteRepositoryCache')
             eventlog.AddLogEntry(LogTypeEnum.Request, Context.event, Context.action)
-            WebhookStatistics.query.all()[0].RequestReceived()
             Status, Message = Context.QueueGithubRequest()
             eventlog.AddLogEntry(LogTypeEnum.Response, str(Status), Message)
         return redirect('/config/logsrepo/'+str(repoid))
 
     @app.route('/webhook/<OrgName>/<RepoName>', methods=['POST'])
     def webhook(OrgName, RepoName):
-        WebhookStatistics.query.all()[0].RequestReceived()
         try:
             webhookconfiguration = WebhookConfiguration.query.filter_by(GithubRepo = OrgName + '/' + RepoName).first()
         except:
             abort(400, 'Unsupported repo')
         if not webhookconfiguration:
             abort(400, 'Unsupported repo')
+        webhookconfiguration.RequestReceived()
         eventlog = webhookconfiguration.AddEventEntry()
         Context = GithubRequest(app, webhookconfiguration, eventlog)
         Status, Message = Context.ProcessGithubRequest()
@@ -257,7 +273,8 @@ def WaitForGitHubRequest():
                 Status, Message = Context.DispatchGithubRequest()
                 eventlog.AddLogEntry(LogTypeEnum.Finished, str(Status), Message)
                 queue.ack(item)
-                WebhookStatistics.query.all()[0].RequestProcessed()
+                if Context.event != 'CUSTOM':
+                    webhookconfiguration.RequestProcessed()
 
 def WaitForSendEmailsRequest():
     with app.app_context():

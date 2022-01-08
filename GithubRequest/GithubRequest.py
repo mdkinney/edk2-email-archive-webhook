@@ -377,6 +377,9 @@ class GithubRequest(object):
 
     def DispatchGithubRequest(self):
         try:
+            if self.event=='CUSTOM' and self.action=='ResetStatistics':
+                self.webhookconfiguration.ResetStatistics()
+                return 200, 'successfully processed %s event with action %s' % (self.event, self.action)
             if self.event=='CUSTOM' and self.action=='DeleteRepositoryCache':
                 return self.DeleteRepositoryCache()
             if self.event=='CUSTOM' and self.action=='ClearLogs':
@@ -417,7 +420,8 @@ class GithubRequest(object):
             self.payload,
             datetime.now()
             ))
-        WebhookStatistics.query.all()[0].RequestQueued()
+        if self.event != 'CUSTOM':
+            self.webhookconfiguration.RequestQueued()
         return 202, 'Event %s with action %s queued for processing' % (self.event, self.action)
 
     def ProcessGithubRequest(self):
